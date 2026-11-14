@@ -273,7 +273,15 @@ async function convert(pc, vault, opts = {}) {
   if (protector) { arm.push("Heavy"); wp = [...wp, "martial"]; }
   if (arm.length) out.armor_training = [...new Set(arm)].join(", ");
   const wprof = new Set(wp.map((x) => String(x).toLowerCase()));
-  if (wp.length) out.weapon_proficiencies = wp.map(titleCase).join(", ");
+  const wrules = []; // property rules such as the Rogue's "Martial weapons that have the Finesse or Light property"
+  const wfixed = arr((pr.weapons || {}).fixed).filter((x) => typeof x === "string");
+  for (const ph of wfixed) {
+    const mm = ph.match(/\b(simple|martial)\b.*?\b(?:have|has|with)\b.*?\bthe\s+(.+?)\s+propert/i);
+    if (mm) wrules.push([mm[1].toLowerCase(), new Set(mm[2].split(/\s+or\s+|,|\s+and\s+/i).map((x) => x.trim().toLowerCase()).filter(Boolean))]);
+    else if (/^\s*(simple|martial)( weapons?)?\s*$/i.test(ph)) wprof.add(ph.trim().split(/\s+/)[0].toLowerCase());
+    else { wprof.add(ph.trim().toLowerCase()); wprof.add(ph.trim().toLowerCase().replace(/s$/, "")); }
+  }
+  if (wp.length || wfixed.length) out.weapon_proficiencies = [...wp.map(titleCase), ...wfixed].join(", ");
   const tools = []; for (const t of arr(bg.tool_proficiencies)) if (t && typeof t === "object") tools.push(...arr(t.items).map(String));
   const toolName = (x) => String(x).replace(/-/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase()).replace(/'S\b/g, "'s");
   for (const [k, v] of Object.entries(oc)) if (/^background:tool/.test(k) || (k.startsWith("race:") && k.includes("tool"))) for (const x of arr(v)) tools.push(String(x).includes("_") ? nameFromSlug(slugOf(String(x))) : toolName(x));
@@ -496,7 +504,7 @@ async function convert(pc, vault, opts = {}) {
       const props = arr(d.properties).map((p) => (typeof p === "string" ? p.toLowerCase().replace(/_/g, " ") : ""));
       const ranged = cat.includes("ranged"), fin = props.includes("finesse");
       const ab = ranged || (fin && m.dex > m.str) ? "dex" : "str";
-      const proficient = wprof.has(cat.split("-")[0]) || wprof.has(nm.toLowerCase());
+      const proficient = wprof.has(cat.split("-")[0]) || wprof.has(nm.toLowerCase()) || wrules.some(([c, set]) => cat.split("-")[0] === c && props.some((x) => set.has(x)));
       const atk = m[ab] + (proficient ? pb : 0), dmg = d.damage || {};
       const e = { name: itemLabel(d, nm, opts), attack: signed(atk), damage: `${dmg.dice || "1"}${m[ab] >= 0 ? "+" : ""}@${ab}.mod`.replace("+-", "-"), type: titleCase(dmg.type || ""), cost: { free: "free", special: "special", bonus: "1 ba", reaction: "1 r" }[String(ov.action || "").toLowerCase()] || "1 a" };
       if ((it.qty || 1) > 1) e.name = itemLabel(d, `${nm} x${it.qty}`, opts);

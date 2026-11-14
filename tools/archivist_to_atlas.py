@@ -417,7 +417,14 @@ def convert(pc, vault, short, classic=False, template=None):
         arm.append("Heavy"); wp = list(wp) + ["martial"]
     if arm: out["armor_training"] = ", ".join(dict.fromkeys(arm))
     wprof = {str(x).lower() for x in wp}
-    if wp: out["weapon_proficiencies"] = ", ".join(str(x).title() for x in wp)
+    wrules = []   # property rules such as the Rogue's "Martial weapons that have the Finesse or Light property"
+    wfixed = [str(x) for x in ((pr.get("weapons") or {}).get("fixed") or []) if isinstance(x, str)]
+    for ph in wfixed:
+        mm = re.search(r"(?i)\b(simple|martial)\b.*?\b(?:have|has|with)\b.*?\bthe\s+(.+?)\s+propert", ph)
+        if mm: wrules.append((mm.group(1).lower(), {x.strip().lower() for x in re.split(r"\s+or\s+|,|\s+and\s+", mm.group(2)) if x.strip()}))
+        elif re.fullmatch(r"(?i)\s*(simple|martial)( weapons?)?\s*", ph): wprof.add(ph.split()[0].lower())
+        else: wprof.add(ph.strip().lower()); wprof.add(re.sub(r"s$", "", ph.strip().lower()))
+    if wp or wfixed: out["weapon_proficiencies"] = ", ".join([str(x).title() for x in wp] + wfixed)
     tools = []
     for t in bg.get("tool_proficiencies", []) or []:
         if isinstance(t, dict): tools += [str(x) for x in t.get("items", []) or []]
@@ -710,7 +717,7 @@ def convert(pc, vault, short, classic=False, template=None):
             ranged = "ranged" in cat
             fin = "finesse" in props
             ab = "dex" if ranged or (fin and m["dex"] > m["str"]) else "str"
-            proficient = cat.split("-")[0] in wprof or nm.lower() in wprof
+            proficient = cat.split("-")[0] in wprof or nm.lower() in wprof or any(cat.split("-")[0] == c_ and (pset_ & set(props)) for c_, pset_ in wrules)
             atk = m[ab] + (pb if proficient else 0)
             dmg = d.get("damage") or {}
             e = {"name": item_label(d, nm), "attack": signed(atk), "damage": f"{dmg.get('dice', '1')}{'+' if m[ab] >= 0 else ''}@{ab}.mod".replace("+-", "-"),
