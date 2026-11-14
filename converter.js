@@ -54,6 +54,10 @@ function spellLabel(d, nm, opts) {
   const f = d._file; if (opts.linkSpells === false || !f) return nm;
   return f === nm ? `[[${f}]]` : `[[${f}|${nm}]]`;
 }
+function itemLabel(d, nm, opts) {   // an item's name as a link to its note, like spells
+  const f = d._file; if (opts.linkSpells === false || !f) return nm;
+  return f === nm ? `[[${f}]]` : `[[${f}|${nm}]]`;
+}
 function spellMechanics(d) {   // short English-keyword line: the Atlas sheet reads saves / attacks from it
   const txt = String(d.description || ""); const parts = [];
   let ab = d.saving_throw && d.saving_throw.ability ? String(d.saving_throw.ability).toLowerCase() : null;
@@ -437,7 +441,7 @@ async function convert(pc, vault, opts = {}) {
   }
 
   // attacks and equipment
-  const acts = [], eqs = [];
+  const acts = [], eqs = [], attunedItems = [];
   const wm = [];
   for (const [c, p] of classes) for (const [lv, ch] of Object.entries(p.choices || {})) if (Number(lv) <= p.level && ch && Array.isArray(ch["weapon-mastery"]))
     for (const ref of ch["weapon-mastery"]) { const wd = await vault.get(ref); const mk = arr(wd.mastery)[0]; wm.push({ name: (wd.name || nameFromSlug(slugOf(ref))) + (mk ? ` (${titleCase(String(mk))})` : "") }); }
@@ -468,8 +472,8 @@ async function convert(pc, vault, opts = {}) {
       const ab = ranged || (fin && m.dex > m.str) ? "dex" : "str";
       const proficient = wprof.has(cat.split("-")[0]) || wprof.has(nm.toLowerCase());
       const atk = m[ab] + (proficient ? pb : 0), dmg = d.damage || {};
-      const e = { name: nm, attack: signed(atk), damage: `${dmg.dice || "1"}${m[ab] >= 0 ? "+" : ""}@${ab}.mod`.replace("+-", "-"), type: titleCase(dmg.type || ""), cost: { free: "free", special: "special", bonus: "1 ba", reaction: "1 r" }[String(ov.action || "").toLowerCase()] || "1 a" };
-      if ((it.qty || 1) > 1) e.name += ` x${it.qty}`;
+      const e = { name: itemLabel(d, nm, opts), attack: signed(atk), damage: `${dmg.dice || "1"}${m[ab] >= 0 ? "+" : ""}@${ab}.mod`.replace("+-", "-"), type: titleCase(dmg.type || ""), cost: { free: "free", special: "special", bonus: "1 ba", reaction: "1 r" }[String(ov.action || "").toLowerCase()] || "1 a" };
+      if ((it.qty || 1) > 1) e.name = itemLabel(d, `${nm} x${it.qty}`, opts);
       const rg = d.range || {};
       e.range = rg.long ? `${rg.normal}/${rg.long} ft` : rg.normal ? `${rg.normal} ft` : ranged ? "" : "Melee";
       if (props.includes("thrown") && rg.normal) e.range = "Melee, " + e.range;
@@ -477,12 +481,20 @@ async function convert(pc, vault, opts = {}) {
       for (const k of Object.keys(e)) if (!e[k]) delete e[k];
       acts.push(e);
     } else {
-      const q = it.qty || 1; const e = { name: nm + (q > 1 ? ` x${q}` : "") };
-      const desc = it.equipped ? "equipped" : it.in ? `in ${it.in}` : ""; if (desc) e.desc = desc; eqs.push(e);
+      const q = it.qty || 1; const e = { name: itemLabel(d, nm + (q > 1 ? ` x${q}` : ""), opts) };
+      const needAtt = needsAttune(d);
+      let desc = it.equipped ? "equipped" : it.in ? `in ${it.in}` : "";
+      if (needAtt) desc = (desc ? desc + ", " : "") + (it.attuned ? "attuned" : "requires attunement (not attuned)");
+      if (desc) e.desc = desc; eqs.push(e);
+      if (needAtt && it.attuned) {
+        let txt = clean(firstText(d), 0).replace(/\s+/g, " ").trim(); if (txt.length > 260) txt = txt.slice(0, 260).replace(/\s+\S*$/, "") + "…";
+        attunedItems.push({ name: e.name, desc: txt || "Attuned" });
+      }
     }
   }
   if (acts.length) out.actions = acts;
   if (eqs.length) out.equipment = eqs;
+  if (attunedItems.length && pips) out.otheractions = [...arr(out.otheractions), { name: `Attunement (${attunedItems.length}/3)`, desc: "Attuned magic items; they are listed below." }, ...attunedItems];
   const cur = pc.currency || {};
   out.currency = ["cp", "sp", "ep", "gp", "pp"].map((k) => cur[k] || null);
   if (unresolved.length) warn.push("spells without a note in the vault were skipped: " + unresolved.join(", "));

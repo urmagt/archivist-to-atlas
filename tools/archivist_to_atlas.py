@@ -134,6 +134,11 @@ def spell_label(d, nm):
     f = d.get("_file")
     if not (LINK_SPELLS and f): return nm
     return f"[[{f}]]" if f == nm else f"[[{f}|{nm}]]"
+def item_label(d, nm):
+    """An item's name as a link to its note ([[file|Name]]), like spells; plain text when the vault has no note for it."""
+    f = d.get("_file")
+    if not (LINK_SPELLS and f): return nm
+    return f"[[{f}]]" if f == nm else f"[[{f}|{nm}]]"
 def spell_mechanics(d):
     """Short English-keyword line (the Atlas sheet reads saves/attacks from it): save, attack, damage."""
     txt = str(d.get("description") or ""); parts = []
@@ -618,7 +623,7 @@ def convert(pc, vault, short, classic=False, template=None):
         out["slots"] = [{"name": f"Level {i + 1}", "max": n, "used": int((st_used.get(str(i + 1)) or st_used.get(i + 1) or {}).get("used", 0)) if isinstance(st_used.get(str(i + 1)) or st_used.get(i + 1), dict) else 0} for i, n in enumerate(slots)]
 
     # ---- attacks and equipment
-    acts, eqs = [], []
+    acts, eqs, attuned = [], [], []
     wm = []
     for cdat, pcc in classes:
         for lv, ch in (pcc.get("choices") or {}).items():
@@ -665,9 +670,9 @@ def convert(pc, vault, short, classic=False, template=None):
             proficient = cat.split("-")[0] in wprof or nm.lower() in wprof
             atk = m[ab] + (pb if proficient else 0)
             dmg = d.get("damage") or {}
-            e = {"name": nm, "attack": signed(atk), "damage": f"{dmg.get('dice', '1')}{'+' if m[ab] >= 0 else ''}@{ab}.mod".replace("+-", "-"),
+            e = {"name": item_label(d, nm), "attack": signed(atk), "damage": f"{dmg.get('dice', '1')}{'+' if m[ab] >= 0 else ''}@{ab}.mod".replace("+-", "-"),
                  "type": str(dmg.get("type", "")).title(), "cost": {"free": "free", "special": "special", "bonus": "1 ba", "reaction": "1 r"}.get(str(ov.get("action", "")).lower(), "1 a")}
-            if it.get("qty", 1) and it.get("qty", 1) > 1: e["name"] += f" x{it['qty']}"
+            if it.get("qty", 1) and it.get("qty", 1) > 1: e["name"] = item_label(d, nm + f" x{it['qty']}")
             rg = d.get("range") or {}
             e["range"] = f"{rg['normal']}/{rg['long']} ft" if rg.get("long") else (f"{rg['normal']} ft" if rg.get("normal") else ("Melee" if not ranged else ""))
             if "thrown" in props and rg.get("normal"): e["range"] = "Melee, " + e["range"]
@@ -675,9 +680,20 @@ def convert(pc, vault, short, classic=False, template=None):
             acts.append({k: v for k, v in e.items() if v})
         else:
             q = it.get("qty", 1)
-            eqs.append({k: v for k, v in {"name": nm + (f" x{q}" if q and q > 1 else ""), "desc": ("equipped" if it.get("equipped") else ("in " + str(it["in"]) if it.get("in") else ""))}.items() if v})
+            need_att = _needs_attune(d)
+            dsc = "equipped" if it.get("equipped") else ("in " + str(it["in"]) if it.get("in") else "")
+            if need_att: dsc = (dsc + ", " if dsc else "") + ("attuned" if it.get("attuned") else "requires attunement (not attuned)")
+            lab = item_label(d, nm + (f" x{q}" if q and q > 1 else ""))
+            eqs.append({k: v for k, v in {"name": lab, "desc": dsc}.items() if v})
+            if need_att and it.get("attuned"):
+                txt = re.sub(r"\s+", " ", clean(first_text(d), 0)).strip()
+                if len(txt) > 260: txt = (txt[:260].rsplit(" ", 1)[0] + "…")
+                attuned.append({"name": lab, "desc": txt or "Attuned"})
     if acts: out["actions"] = acts
     if eqs: out["equipment"] = [e for e in eqs]
+    if attuned and pips:   # attuned magic items: listed under Actions > Other (most give an ability), with the slots used
+        hdr = {"name": f"Attunement ({len(attuned)}/3)", "desc": "Attuned magic items; they are listed below."}
+        out["otheractions"] = list(out.get("otheractions") or []) + [hdr] + attuned
     cur = pc.get("currency") or {}
     out["currency"] = [cur.get(k) if cur.get(k) else None for k in ("cp", "sp", "ep", "gp", "pp")]
     if unresolved: warn.append("spells without a note in the vault were skipped: " + ", ".join(unresolved))
