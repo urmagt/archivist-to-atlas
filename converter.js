@@ -301,8 +301,20 @@ async function convert(pc, vault, opts = {}) {
   };
   let cf = [];
   for (const [c, p] of classes) {
+    const start = cf.length;
     cf.push(...featEntries(c.features_by_level, p.level));
     if (p.subclass) cf.push(...featEntries((await vault.get(p.subclass)).features_by_level, p.level));
+    // features that scale by a class table column ("as shown in the Sneak Attack column..."): print today's value
+    const cols = (((c.table || {})[String(p.level)] || {}).columns) || {};
+    for (const f of cf.slice(start)) {
+      const seen = [];
+      for (const mm of f.desc.matchAll(/(?:in|of) the ([A-Z][A-Za-z' ]+?) column/g)) {
+        const cn = mm[1].trim();
+        if (seen.includes(cn) || ["Cantrips", "Prepared Spells", "Spells Known", "Invocations", "Spell Slots", "Slot Level"].includes(cn) || !(cn in cols)) continue;
+        seen.push(cn);
+      }
+      if (seen.length) f.desc = f.desc.replace(/\s+$/, "") + `\n\nAt level ${p.level}: ` + seen.map((cn) => `${cn} ${cols[cn]}`).join("; ");
+    }
   }
   cf = cf.filter((f) => !/^(ability score improvement|subclass.*|epic boon)$/i.test(f.name));
   // class selection-pool picks (infusions, invocations, metamagic...): list the chosen optional features

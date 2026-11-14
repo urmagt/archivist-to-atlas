@@ -453,10 +453,20 @@ def convert(pc, vault, short, classic=False, template=None):
         return [v for v in got.values() if v]
     cf = []
     for cdat, pcc in classes:
+        _start = len(cf)
         cf += feat_entries(cdat.get("features_by_level") or {}, pcc["level"])
         if pcc.get("subclass"):
             sub = vault.get(pcc["subclass"])
             cf += feat_entries(sub.get("features_by_level") or {}, pcc["level"])
+        # features that scale by a class table column ("as shown in the Sneak Attack column..."): print today's value
+        cols_ = ((cdat.get("table") or {}).get(str(pcc["level"])) or {}).get("columns") or {}
+        for f_ in cf[_start:]:
+            seen_ = []
+            for cn in re.findall(r"(?:in|of) the ([A-Z][A-Za-z' ]+?) column", f_["desc"]):
+                cn = cn.strip()
+                if cn in seen_ or cn in ("Cantrips", "Prepared Spells", "Spells Known", "Invocations", "Spell Slots", "Slot Level") or cn not in cols_: continue
+                seen_.append(cn)
+            if seen_: f_["desc"] = f_["desc"].rstrip() + "\n\nAt level " + str(pcc["level"]) + ": " + "; ".join(f"{c_} {cols_[c_]}" for c_ in seen_)
     cf = [f for f in cf if not re.fullmatch(r"(?i)ability score improvement|subclass.*|epic boon", f["name"]) ]
     # class selection-pool picks (infusions, invocations, metamagic...): list the chosen optional features
     for cdat, pcc in classes:
