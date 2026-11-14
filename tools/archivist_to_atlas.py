@@ -296,13 +296,20 @@ def convert(pc, vault, short, classic=False, template=None):
             if int(lv) <= pcc["level"] and isinstance(ch, dict):
                 for key, v in ch.items():
                     if key == "skills" and isinstance(v, list): prof |= {s.replace("-", "_") for s in v}
+                    if re.search(r"expertise", str(key), re.I) and isinstance(v, (str, list)):   # Rogue/Bard/Ranger expertise picks (expertise, expertise-2, feat:expertise...)
+                        expert |= {str(x).replace("-", "_") for x in ([v] if isinstance(v, str) else v) if isinstance(x, str) and not x.startswith("[[")}
                     if key.endswith("skill") and isinstance(v, (str, list)):
                         prof |= {s.replace("-", "_") for s in ([v] if isinstance(v, str) else v)}
     for k, v in oc.items():
+        if re.search(r"expertise", k, re.I) and isinstance(v, (str, list)):
+            expert |= {str(x).replace("-", "_") for x in ([v] if isinstance(v, str) else v) if isinstance(x, str)}
         if k.startswith(("race:", "background:")) and k.endswith("skill") and isinstance(v, (str, list)):
             prof |= {str(x).replace("-", "_") for x in ([v] if isinstance(v, str) else v)}
     for e in effects:
-        if e.get("kind") == "proficiency" and e.get("proficiency_type") == "skill": prof.add(str(e["value"]).replace("-", "_"))
+        if e.get("kind") == "proficiency" and e.get("proficiency_type") == "skill":
+            prof.add(str(e["value"]).replace("-", "_"))
+            if e.get("expertise"): expert.add(str(e["value"]).replace("-", "_"))
+    prof |= expert   # expertise implies proficiency
     half = any(e.get("kind") == "half-proficiency" for e in effects) or any(
         e.get("kind") == "half-proficiency" for _c, _p in classes for f_ in ((_c.get("features_by_level") or {}).values()) for ft in (f_ if isinstance(f_, list) else []) for e in (ft.get("effects") or []))
     for k in SKILLS:

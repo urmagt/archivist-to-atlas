@@ -182,12 +182,15 @@ async function convert(pc, vault, opts = {}) {
   for (const [, p] of classes) for (const [lv, ch] of Object.entries(p.choices || {})) {
     if (Number(lv) > p.level || !ch || typeof ch !== "object") continue;
     for (const [key, v] of Object.entries(ch)) {
+      if (/expertise/i.test(key) && (typeof v === "string" || Array.isArray(v))) arr(v).forEach((x) => { if (typeof x === "string" && !x.startsWith("[[")) expert.add(norm(x)); }); // Rogue/Bard/Ranger expertise picks
       if (key === "skills" && Array.isArray(v)) v.forEach((s) => prof.add(norm(s)));
       else if (key.endsWith("skill") && (typeof v === "string" || Array.isArray(v))) arr(v).forEach((s) => prof.add(norm(s)));
     }
   }
+  for (const [k, v] of Object.entries(oc)) if (/expertise/i.test(k) && (typeof v === "string" || Array.isArray(v))) arr(v).forEach((x) => { if (typeof x === "string") expert.add(norm(x)); });
   for (const [k, v] of Object.entries(oc)) if (/^(race|background):/.test(k) && k.endsWith("skill") && (typeof v === "string" || Array.isArray(v))) arr(v).forEach((x) => prof.add(norm(x)));
-  for (const e of effects) if (e.kind === "proficiency" && e.proficiency_type === "skill") prof.add(norm(e.value));
+  for (const e of effects) if (e.kind === "proficiency" && e.proficiency_type === "skill") { prof.add(norm(e.value)); if (e.expertise) expert.add(norm(e.value)); }
+  expert.forEach((x) => prof.add(x)); // expertise implies proficiency
   let half = effects.some((e) => e.kind === "half-proficiency");
   for (const k of SKILLS) {
     const lvl = expert.has(k) ? "2" : prof.has(k) ? "1" : (half && pips ? "half" : null);
