@@ -433,6 +433,10 @@ async function convert(pc, vault, opts = {}) {
   let scAb = null;
   for (const [c, p] of classes) { const sp = c.spellcasting || (p.subclass ? (await vault.get(p.subclass)).spellcasting : null); if (sp && sp.ability) { scAb = sp.ability; break; } }
   if (!scAb) scAb = oc["background:feat:spellcasting-ability"];
+  if (!scAb) { // a non-caster with species/feat spells (Wood Elf Rogue): use the ability picked for them
+    const cands = [...Object.entries(oc), ...classes.flatMap(([, p]) => Object.values(p.choices || {}).filter((ch) => ch && typeof ch === "object").flatMap((ch) => Object.entries(ch)))];
+    for (const [k, v] of cands) if (String(k).endsWith("spellcasting-ability") && ABILS.includes(v)) { scAb = v; break; }
+  }
   if (scAb && (cant.length || Object.keys(tabs).length || prepCounters.length)) {
     out.spellcasting_ability = pips ? titleCase(ABIL_FULL[scAb]).slice(0, 3) : titleCase(ABIL_FULL[scAb]); out.spell_save_dc = `8+@${scAb}.mod+@pb`; out.spell_attack_bonus = `@${scAb}.mod+@pb`;
   }

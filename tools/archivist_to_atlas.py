@@ -613,6 +613,9 @@ def convert(pc, vault, short, classic=False, template=None):
         if sp and sp.get("ability"): sc_ab = sp["ability"]; break
     if not sc_ab:
         sc_ab = (oc.get("background:feat:spellcasting-ability"))
+    if not sc_ab:   # a non-caster with species/feat spells (Wood Elf Rogue): use the ability picked for them
+        for k_, v_ in list(oc.items()) + [(k2, v2) for _c, pc_ in classes for ch_ in (pc_.get("choices") or {}).values() if isinstance(ch_, dict) for k2, v2 in ch_.items()]:
+            if str(k_).endswith("spellcasting-ability") and v_ in ABILS: sc_ab = v_; break
     if sc_ab and (cant or tabs or prepared_counters):
         out["spellcasting_ability"] = ABIL_FULL[sc_ab].title()[:3] if pips else ABIL_FULL[sc_ab].title()
         out["spell_save_dc"] = f"8+@{sc_ab}.mod+@pb"
