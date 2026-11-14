@@ -482,10 +482,19 @@ def convert(pc, vault, short, classic=False, template=None):
     out["species_traits"] = st
     feats = []
     bg_feat = bg.get("origin_feat")
+    def feat_text(f):   # a feat's intro line plus its `benefits` bullets (Alert: "You gain the following benefits." + the two benefits)
+        t = first_text(f); ben = []
+        for b in f.get("benefits") or []:
+            if isinstance(b, str): ben.append(b.strip())
+            elif isinstance(b, dict):
+                nm_, ds_ = str(b.get("name") or "").strip(), str(b.get("description") or b.get("desc") or "").strip()
+                ben.append((f"**{nm_}.** " if nm_ else "") + ds_)
+        ben = [b for b in ben if b]
+        return (t + ("\n\n" if t and ben else "") + "\n".join("- " + b for b in ben)).strip()
     def feat_entry(ref, extra=""):
         f = vault.get(ref, "feat")
         nm = f.get("name") or name_from_slug(slug_of(ref))
-        return {"name": nm + (f" ({extra})" if extra else ""), "desc": clean(first_text(f), lim)}
+        return {"name": nm + (f" ({extra})" if extra else ""), "desc": clean(feat_text(f), lim)}
     if bg_feat:
         extra = ""
         if oc.get("background:feat:spell-list"):

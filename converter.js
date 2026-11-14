@@ -330,7 +330,11 @@ async function convert(pc, vault, opts = {}) {
   }
   out.species_traits = st;
   const feats = [];
-  const featEntry = async (ref, extra) => { const f = await vault.get(ref, "feat"); return { name: (f.name || nameFromSlug(slugOf(ref))) + (extra ? ` (${extra})` : ""), desc: clean(firstText(f), short) }; };
+  const featText = (f) => { // intro line plus the feat's `benefits` bullets
+    const t = firstText(f); const ben = arr(f.benefits).map((b) => typeof b === "string" ? b.trim() : b && typeof b === "object" ? ((b.name ? `**${String(b.name).trim()}.** ` : "") + String(b.description || b.desc || "").trim()) : "").filter(Boolean);
+    return (t + (t && ben.length ? "\n\n" : "") + ben.map((b) => "- " + b).join("\n")).trim();
+  };
+  const featEntry = async (ref, extra) => { const f = await vault.get(ref, "feat"); return { name: (f.name || nameFromSlug(slugOf(ref))) + (extra ? ` (${extra})` : ""), desc: clean(featText(f), short) }; };
   if (bg.origin_feat) {
     let extra = "";
     if (oc["background:feat:spell-list"]) {
