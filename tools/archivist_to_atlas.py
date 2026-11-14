@@ -482,6 +482,7 @@ def convert(pc, vault, short, classic=False, template=None):
     out["species_traits"] = st
     feats = []
     bg_feat = bg.get("origin_feat")
+    feat_docs = []
     def feat_text(f):   # a feat's intro line plus its `benefits` bullets (Alert: "You gain the following benefits." + the two benefits)
         t = first_text(f); ben = []
         for b in f.get("benefits") or []:
@@ -492,7 +493,7 @@ def convert(pc, vault, short, classic=False, template=None):
         ben = [b for b in ben if b]
         return (t + ("\n\n" if t and ben else "") + "\n".join("- " + b for b in ben)).strip()
     def feat_entry(ref, extra=""):
-        f = vault.get(ref, "feat")
+        f = vault.get(ref, "feat"); feat_docs.append(f)
         nm = f.get("name") or name_from_slug(slug_of(ref))
         return {"name": nm + (f" ({extra})" if extra else ""), "desc": clean(feat_text(f), lim)}
     if bg_feat:
@@ -511,6 +512,36 @@ def convert(pc, vault, short, classic=False, template=None):
     for k, v in oc.items():
         if k.startswith("race:") and "feat" in k and isinstance(v, str) and v: feats.append(feat_entry(v, ""))
     out["feats"] = feats
+    # initiative = Dex modifier + every initiative-bonus effect (Alert: your Proficiency Bonus, ...)
+    def _amt(e):
+        if e.get("value") is not None:
+            try: return int(e["value"])
+            except Exception: return 0
+        a = str(e.get("amount") or "").strip().lower()
+        if not a: return 0
+        a = re.sub(r"\{prof\}|\byour proficiency bonus\b|\bproficiency bonus\b", str(pb), a)
+        a = re.sub(r"\{(str|dex|con|int|wis|cha)_mod\}", lambda mm: str(m[mm.group(1)]), a)
+        for ab_, full_ in ABIL_FULL.items(): a = re.sub(rf"\byour {full_.lower()} modifier\b", str(m[ab_]), a)
+        a = re.sub(r"\bhalf (\d+)\b", lambda mm: str(int(mm.group(1)) // 2), a)
+        return int(eval(a, {"__builtins__": {}}, {})) if re.fullmatch(r"[\d\s+\-*/().]+", a) else 0
+    init_effs = [e for e in effects if isinstance(e, dict)]
+    for f_ in feat_docs: init_effs += [e for e in (f_.get("effects") or []) if isinstance(e, dict)]
+    for cdat, pcc in classes:
+        for src_ in [cdat, vault.get(pcc.get("subclass"))]:
+            for lv_, fl_ in ((src_.get("features_by_level") or {}).items() if isinstance(src_, dict) else []):
+                if str(lv_).isdigit() and int(lv_) <= pcc["level"]:
+                    for ft_ in (fl_ or []):
+                        if isinstance(ft_, dict) and not ft_.get("activatable"): init_effs += [e for e in (ft_.get("effects") or []) if isinstance(e, dict)]
+    for it_ in eq:   # worn magic items (attuned when they need it)
+        if not it_.get("equipped"): continue
+        n_ = vault.get(it_["item"])
+        if n_ and (not _needs_attune(n_) or it_.get("attuned")): init_effs += [e for e in (n_.get("effects") or []) if isinstance(e, dict)]
+    init_bonus = 0
+    for e in init_effs:
+        if e.get("kind") == "initiative-bonus" and str(e.get("subject") or "self") == "self":
+            try: init_bonus += _amt(e)
+            except Exception: pass
+    out["initiative"] = m["dex"] + init_bonus
 
     # ---- spells
     spells = {}   # slug -> dict(level, prepared)

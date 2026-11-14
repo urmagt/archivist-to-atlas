@@ -334,7 +334,8 @@ async function convert(pc, vault, opts = {}) {
     const t = firstText(f); const ben = arr(f.benefits).map((b) => typeof b === "string" ? b.trim() : b && typeof b === "object" ? ((b.name ? `**${String(b.name).trim()}.** ` : "") + String(b.description || b.desc || "").trim()) : "").filter(Boolean);
     return (t + (t && ben.length ? "\n\n" : "") + ben.map((b) => "- " + b).join("\n")).trim();
   };
-  const featEntry = async (ref, extra) => { const f = await vault.get(ref, "feat"); return { name: (f.name || nameFromSlug(slugOf(ref))) + (extra ? ` (${extra})` : ""), desc: clean(featText(f), short) }; };
+  const featDocs = [];
+  const featEntry = async (ref, extra) => { const f = await vault.get(ref, "feat"); featDocs.push(f); return { name: (f.name || nameFromSlug(slugOf(ref))) + (extra ? ` (${extra})` : ""), desc: clean(featText(f), short) }; };
   if (bg.origin_feat) {
     let extra = "";
     if (oc["background:feat:spell-list"]) {
@@ -352,6 +353,23 @@ async function convert(pc, vault, opts = {}) {
   }
   for (const [k, v] of Object.entries(oc)) if (k.startsWith("race:") && k.includes("feat") && typeof v === "string" && v) feats.push(await featEntry(v, ""));
   out.feats = feats;
+  // initiative = Dex modifier + every initiative-bonus effect (Alert: your Proficiency Bonus, ...)
+  const amt = (e) => {
+    if (e.value !== undefined && e.value !== null) return parseInt(e.value, 10) || 0;
+    let a = String(e.amount || "").trim().toLowerCase(); if (!a) return 0;
+    a = a.replace(/\{prof\}|\byour proficiency bonus\b|\bproficiency bonus\b/g, String(pb)).replace(/\{(str|dex|con|int|wis|cha)_mod\}/g, (_, x) => String(m[x]));
+    for (const [ab, full] of Object.entries(ABIL_FULL)) a = a.replace(new RegExp(`\\byour ${full} modifier\\b`, "g"), String(m[ab]));
+    a = a.replace(/\bhalf (\d+)\b/g, (_, n) => String(Math.floor(Number(n) / 2)));
+    return /^[\d\s+\-*/().]+$/.test(a) ? Math.trunc(Function(`"use strict";return (${a})`)()) : 0;
+  };
+  const initEffs = [...effects, ...featDocs.flatMap((f) => arr(f.effects))];
+  for (const [c, p] of classes) for (const src of [c, p.subclass ? await vault.get(p.subclass) : null]) {
+    for (const [lv, fl] of Object.entries((src && src.features_by_level) || {})) if (/^\d+$/.test(lv) && Number(lv) <= p.level) for (const ft of arr(fl)) if (ft && !ft.activatable) initEffs.push(...arr(ft.effects));
+  }
+  for (const it of eq) { if (!it.equipped) continue; const n = await vault.get(it.item); if (n && (!needsAttune(n) || it.attuned)) initEffs.push(...arr(n.effects)); }
+  let initBonus = 0;
+  for (const e of initEffs) if (e && e.kind === "initiative-bonus" && String(e.subject || "self") === "self") { try { initBonus += amt(e); } catch (x) {} }
+  out.initiative = m.dex + initBonus;
 
   // spells
   const spells = new Map();
