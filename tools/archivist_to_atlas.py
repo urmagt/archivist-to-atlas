@@ -437,6 +437,8 @@ def convert(pc, vault, short, classic=False, template=None):
                 for key, v in ch.items():
                     if re.search(r"(^|-)tools?($|-)", key) and isinstance(v, (str, list)):
                         tools += [str(x).replace("-", " ").title().replace("'S", "'s") for x in ([v] if isinstance(v, str) else v)]
+    tools = [re.sub(r"\b([a-z])", lambda mm: mm.group(1).upper(), t.replace("-", " ")) if re.fullmatch(r"[a-z' -]+", t) else t for t in tools]
+    tools = [t.replace("'S", "'s") for t in tools]
     tools = list(dict.fromkeys(tools))
     if tools: out["tool_proficiencies"] = ", ".join(tools)
 
@@ -575,7 +577,7 @@ def convert(pc, vault, short, classic=False, template=None):
         for lv, ch in (pcc.get("choices") or {}).items():
             if isinstance(ch, dict) and int(lv) <= pcc["level"]:
                 for k, v in ch.items():
-                    if str(k).startswith("feat:") and re.search(r"cantrip|spell|level\d", k) and "list" not in k and "ability" not in k:
+                    if (str(k).startswith("feat:") or any(str(k).startswith(str(pl_.get("id")) + ":") for pl_ in (cdat.get("selection_pools") or []) if isinstance(pl_, dict))) and re.search(r"cantrip|spell|level\d", k) and "list" not in k and "ability" not in k:
                         for x in (v if isinstance(v, list) else [v]):
                             if isinstance(x, str): add(x, prepared=True)
     adds = []
@@ -604,7 +606,11 @@ def convert(pc, vault, short, classic=False, template=None):
                 for lv, names in (entry.get(key) or {}).items() if isinstance(entry.get(key), dict) else []:
                     if lv != "_" and (not str(lv).isdigit() or int(lv) > level_total): continue
                     adds += _flat(names)
-    for n in adds: spells.setdefault(re.sub(r"[^a-z0-9]+", "-", re.sub(r"['’]", "", n.lower())).strip("-"), {"prepared": True, "always": True, "name": n})
+    for n in adds:
+        sl_ = re.sub(r"[^a-z0-9]+", "-", re.sub(r"['’]", "", n.lower())).strip("-")
+        have_ = next((k for k in spells if k == sl_ or k.endswith("_spell_" + sl_) or k.endswith("_spell_" + sl_ + "-es")), None)   # the same spell already picked under its full slug
+        if have_: spells[have_]["prepared"] = True; spells[have_]["always"] = True
+        else: spells[sl_] = {"prepared": True, "always": True, "name": n}
     info = {}
     for sl, st_ in spells.items():
         d = vault.get(sl)
@@ -649,6 +655,9 @@ def convert(pc, vault, short, classic=False, template=None):
     for sl, s_ in spells.items():
         d = info[sl]
         if d.get("level") is not None: book.setdefault(int(d["level"]), []).append(spell_entry(sl))
+    if any("agonizing-blast" in str(pk_) for _c, pcc_ in classes for ch_ in (pcc_.get("choices") or {}).values() if isinstance(ch_, dict) for v_ in ch_.values() if isinstance(v_, list) for pk_ in v_):
+        for e_ in cant:   # Agonizing Blast: Eldritch Blast adds the Charisma modifier to its damage
+            if "eldritch-blast" in str(e_.get("name", "")) and e_.get("damage") and "@cha.mod" not in str(e_["damage"]): e_["damage"] = f"{e_['damage']}+@cha.mod"
     if cant: out["spellcasting"] = cant
     if not classic and not pips:   # the pips sheet has no all-spells (spellbook) tabs
         for lv, lst in sorted(book.items()):
@@ -669,18 +678,33 @@ def convert(pc, vault, short, classic=False, template=None):
         out["spell_save_dc"] = f"8+@{sc_ab}.mod+@pb"
         out["spell_attack_bonus"] = f"@{sc_ab}.mod+@pb"
     # slots
-    clevel = 0; single = None
+    clevel = 0; casters = 0; slots = None; pact = None
+    st_used = (pc.get("state") or {}).get("spell_slots") or {}
+    PACT = {1: (1, 1), 2: (2, 1), 3: (2, 2), 4: (2, 2), 5: (2, 3), 6: (2, 3), 7: (2, 4), 8: (2, 4), 9: (2, 5), 10: (2, 5), 11: (3, 5), 12: (3, 5), 13: (3, 5), 14: (3, 5), 15: (3, 5), 16: (3, 5), 17: (4, 5), 18: (4, 5), 19: (4, 5), 20: (4, 5)}
+    def _num(x):
+        mm_ = re.match(r"\d+", str(x)); return int(mm_.group(0)) if mm_ else 0
     for cdat, pcc in classes:
         ct = (cdat.get("spellcasting") or {}).get("caster_type")
         lv = pcc["level"]
-        if ct == "full": clevel += lv
-        elif ct == "half": clevel += lv // 2
-        elif ct == "half-up": clevel += math.ceil(lv / 2)
-        elif ct == "third": clevel += lv // 3
-    if clevel:
-        slots = FULL_SLOTS[min(20, clevel)]
-        st_used = (pc.get("state") or {}).get("spell_slots") or {}
-        out["slots"] = [{"name": f"Level {i + 1}", "max": n, "used": int((st_used.get(str(i + 1)) or st_used.get(i + 1) or {}).get("used", 0)) if isinstance(st_used.get(str(i + 1)) or st_used.get(i + 1), dict) else 0} for i, n in enumerate(slots)]
+        cols = ((cdat.get("table") or {}).get(str(lv)) or {}).get("columns") or {}
+        if ct == "pact":
+            n_, lvl_ = _num(cols.get("Spell Slots")), _num(cols.get("Slot Level"))
+            if not (n_ and lvl_): n_, lvl_ = PACT[min(20, lv)]
+            pact = (n_, lvl_)
+        elif ct in ("full", "half", "half-up", "third"):
+            casters += 1
+            own = {_num(k): _num(v) for k, v in cols.items() if re.fullmatch(r"\d+(st|nd|rd|th)", str(k))}
+            if own and max(own.values()) > 0: slots = [own.get(i, 0) for i in range(1, max(k for k, v in own.items() if v) + 1)]
+            if ct == "full": clevel += lv
+            elif ct == "half": clevel += lv // 2
+            elif ct == "half-up": clevel += math.ceil(lv / 2)
+            elif ct == "third": clevel += lv // 3
+    if casters > 1 or slots is None: slots = FULL_SLOTS[min(20, clevel)] if clevel else None   # multiclass: the combined table
+    if slots:
+        out["slots"] = [{"name": f"Level {i + 1}", "max": n, "used": int((st_used.get(str(i + 1)) or st_used.get(i + 1) or {}).get("used", 0)) if isinstance(st_used.get(str(i + 1)) or st_used.get(i + 1), dict) else 0} for i, n in enumerate(slots) if n]
+    if pact:
+        pu = st_used.get("pact") if isinstance(st_used.get("pact"), dict) else {}
+        out["slots"] = list(out.get("slots") or []) + [{"name": f"Pact Magic (Level {pact[1]})", "max": pact[0], "used": int(pu.get("used", 0))}]
 
     # ---- attacks and equipment
     acts, eqs, attuned = [], [], []
@@ -697,11 +721,19 @@ def convert(pc, vault, short, classic=False, template=None):
     if wm and "weapon_mastery" not in out: out["weapon_mastery"] = wm
     fu = (pc.get("state") or {}).get("feature_uses") or {}
     cfn = {re.sub(r"[^a-z0-9]+", "-", f["name"].lower()).strip("-"): f["name"] for f in cf}
+    resmap = {}   # resource id -> its display name (Lay On Hands, Paladin's Smite, Channel Divinity...)
+    for src_ in [c_ for c_, _p in classes] + [vault.get(p_.get("subclass")) for _c, p_ in classes if p_.get("subclass")] + [race]:
+        for fl_ in ((src_.get("features_by_level") or {}).values() if isinstance(src_, dict) else []):
+            for ft_ in (fl_ or []):
+                for r_ in (ft_.get("resources") or []) if isinstance(ft_, dict) else []:
+                    if isinstance(r_, dict) and r_.get("id") and r_.get("name"):
+                        resmap[r_["id"]] = r_["name"]
+                        for eq_ in r_.get("equivalent_ids") or []: resmap.setdefault(eq_, r_["name"])
     res_c = []
     for k, v in fu.items():
         if not isinstance(v, dict) or not v.get("max"): continue
         fid = k.split(":")[-1]
-        res_c.append({"name": cfn.get(fid) or fid.replace("-", " ").title(), "max": int(v["max"]), "used": int(v.get("used", 0))})
+        res_c.append({"name": resmap.get(k) or cfn.get(fid) or fid.replace("-", " ").title(), "max": int(v["max"]), "used": int(v.get("used", 0))})
     if pips:   # use pips live in the section they belong to: species traits, feats, class features
         spkey = re.sub(r"[^a-z0-9]+", "-", str(race.get("name", "")).lower()).strip("-")
         featkeys = {re.sub(r"[^a-z0-9]+", "-", str(f.get("name", "")).lower()).strip("-") for f in (out.get("feats") or [])}
@@ -710,7 +742,7 @@ def convert(pc, vault, short, classic=False, template=None):
         for k, v in fu.items():
             if not isinstance(v, dict) or not v.get("max"): continue
             pref, _, fid = k.rpartition(":"); fid = fid or pref
-            row = {"name": cfn.get(fid) or fid.replace("-", " ").title(), "max": int(v["max"]), "used": int(v.get("used", 0))}
+            row = {"name": resmap.get(k) or cfn.get(fid) or fid.replace("-", " ").title(), "max": int(v["max"]), "used": int(v.get("used", 0))}
             if pref and (pref == spkey or pref in spkey or fid in spk): buckets["species_trait_uses"].append(row)
             elif fid in featkeys: buckets["feat_uses"].append(row)
             else: buckets["class_feature_uses"].append(row)
@@ -749,6 +781,24 @@ def convert(pc, vault, short, classic=False, template=None):
                 txt = re.sub(r"\s+", " ", clean(first_text(d), 0)).strip()
                 if len(txt) > 260: txt = (txt[:260].rsplit(" ", 1)[0] + "…")
                 attuned.append({"name": lab, "desc": txt or "Attuned"})
+    # conditional damage riders (Sneak Attack...): a clickable damage roll of its own
+    for cdat, pcc in classes:
+        cols_ = ((cdat.get("table") or {}).get(str(pcc["level"])) or {}).get("columns") or {}
+        for src_ in [cdat, vault.get(pcc.get("subclass"))]:
+            for lv_, fl_ in ((src_.get("features_by_level") or {}).items() if isinstance(src_, dict) else []):
+                if not (str(lv_).isdigit() and int(lv_) <= pcc["level"]): continue
+                for ft_ in (fl_ or []):
+                    if not isinstance(ft_, dict) or ft_.get("activatable"): continue
+                    for e_ in ft_.get("effects") or []:
+                        if not isinstance(e_, dict) or e_.get("kind") != "damage-bonus" or not e_.get("condition") or e_.get("applies_to") in ("spell",): continue
+                        amt_ = str(e_.get("amount") or "")
+                        mm_ = re.fullmatch(r"column\('(.+?)'\)", amt_.strip())
+                        if mm_: amt_ = str(cols_.get(mm_.group(1), ""))
+                        if not re.fullmatch(r"\d+d\d+(\s*[+-]\s*\d+)?", amt_.strip()): continue
+                        at_ = e_.get("applies_to"); at_ = ", ".join(at_) if isinstance(at_, list) else (str(at_) if at_ else "weapon")
+                        dt_ = str(e_.get("damage_type") or "")
+                        acts.append({"name": ft_["name"], "damage": amt_.strip(), "type": ("Weapon" if dt_.lower() == "weapon" else dt_.title()),
+                                     "cost": "free", "desc": f"Once per turn (applies to {at_} attacks); {e_['condition']}"})
     if acts: out["actions"] = acts
     if eqs: out["equipment"] = [e for e in eqs]
     if attuned and pips:   # attuned magic items: listed under Actions > Other (most give an ability), with the slots used

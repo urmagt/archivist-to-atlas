@@ -287,7 +287,7 @@ async function convert(pc, vault, opts = {}) {
   for (const [k, v] of Object.entries(oc)) if (/^background:tool/.test(k) || (k.startsWith("race:") && k.includes("tool"))) for (const x of arr(v)) tools.push(String(x).includes("_") ? nameFromSlug(slugOf(String(x))) : toolName(x));
   for (const [c, p] of classes) for (const [lv, ch] of Object.entries(p.choices || {})) if (Number(lv) <= p.level && ch && typeof ch === "object")
     for (const [key, v] of Object.entries(ch)) if (/(^|-)tools?($|-)/.test(key) && (typeof v === "string" || Array.isArray(v))) tools.push(...arr(v).map(toolName));
-  const toolsU = [...new Set(tools)];
+  const toolsU = [...new Set(tools.map((t) => /^[a-z' -]+$/.test(t) ? t.replace(/-/g, " ").replace(/\b([a-z])/g, (x) => x.toUpperCase()).replace(/'S/g, "'s") : t))];
   if (toolsU.length) out.tool_proficiencies = toolsU.join(", ");
 
   // features, traits, feats
@@ -393,12 +393,12 @@ async function convert(pc, vault, opts = {}) {
 
   // spells
   const spells = new Map();
-  const add = (ref, prepared, always, name) => { const sl = slugOf(ref); const cur = spells.get(sl) || { prepared: false, always: false }; if (prepared) cur.prepared = true; if (always) cur.always = true; if (name) cur.name = name; spells.set(sl, cur); };
+  const add = (ref, prepared, always, name) => { let sl = slugOf(ref); if (!sl.includes("_spell_")) for (const k of spells.keys()) if (k.endsWith("_spell_" + sl) || k.endsWith("_spell_" + sl + "-es")) { sl = k; break; } const cur = spells.get(sl) || { prepared: false, always: false }; if (prepared) cur.prepared = true; if (always) cur.always = true; if (name) cur.name = name; spells.set(sl, cur); };
   for (const s of arr((pc.spells || {}).known)) add(s.spell, s.prepared);
   for (const [k, v] of Object.entries(oc)) if (/mi-cantrips|mi-level1|spell/.test(k) && !k.includes("list") && !k.includes("ability")) for (const x of arr(v)) add(x, true);
-  for (const [, p] of classes) for (const [lv, ch] of Object.entries(p.choices || {})) // spells picked through a feat taken in a class slot
+  for (const [c, p] of classes) for (const [lv, ch] of Object.entries(p.choices || {})) // spells picked through a feat taken in a class slot
     if (ch && typeof ch === "object" && Number(lv) <= p.level) for (const [k, v] of Object.entries(ch))
-      if (k.startsWith("feat:") && /cantrip|spell|level\d/.test(k) && !k.includes("list") && !k.includes("ability")) for (const x of arr(v)) if (typeof x === "string") add(x, true);
+      if ((k.startsWith("feat:") || arr(c.selection_pools).some((pl) => pl && k.startsWith(`${pl.id}:`))) && /cantrip|spell|level\d/.test(k) && !k.includes("list") && !k.includes("ability")) for (const x of arr(v)) if (typeof x === "string") add(x, true);
   for (const [c, p] of classes) for (const src of [c, p.subclass ? await vault.get(p.subclass) : {}]) {
     if (!Array.isArray(src.additional_spells)) continue;
     for (const entry of src.additional_spells) for (const key of ["known", "prepared", "innate"]) { // Ranger's Hunter's Mark and domain/oath spells sit under `prepared`
@@ -464,6 +464,8 @@ async function convert(pc, vault, opts = {}) {
       if (on) (tabs[lv] = tabs[lv] || []).push(spellEntry(sl));
     }
   }
+  if (classes.some(([, p]) => Object.values(p.choices || {}).some((ch) => ch && typeof ch === "object" && Object.values(ch).some((v) => Array.isArray(v) && v.some((pk) => String(pk).includes("agonizing-blast"))))))
+    for (const e of cant) if (String(e.name || "").includes("eldritch-blast") && e.damage && !String(e.damage).includes("@cha.mod")) e.damage = `${e.damage}+@cha.mod`; // Agonizing Blast
   if (cant.length) out.spellcasting = cant;
   for (const lv of Object.keys(tabs).sort((a, b) => a - b)) out[`tab_${Number(lv) + 1}`] = tabs[lv];
   if (!classic && !pips) for (const lv of Object.keys(book).sort((a, b) => a - b)) out[`spellbook_${lv}`] = book[lv].sort((a, b) => a.name.localeCompare(b.name));
@@ -478,13 +480,24 @@ async function convert(pc, vault, opts = {}) {
   if (scAb && (cant.length || Object.keys(tabs).length || prepCounters.length)) {
     out.spellcasting_ability = pips ? titleCase(ABIL_FULL[scAb]).slice(0, 3) : titleCase(ABIL_FULL[scAb]); out.spell_save_dc = `8+@${scAb}.mod+@pb`; out.spell_attack_bonus = `@${scAb}.mod+@pb`;
   }
-  let clevel = 0;
-  for (const [c, p] of classes) { const ct = (c.spellcasting || {}).caster_type, lv = p.level;
-    if (ct === "full") clevel += lv; else if (ct === "half") clevel += Math.floor(lv / 2); else if (ct === "half-up") clevel += Math.ceil(lv / 2); else if (ct === "third") clevel += Math.floor(lv / 3); }
-  if (clevel) {
-    const su = (pc.state || {}).spell_slots || {};
-    out.slots = FULL_SLOTS[Math.min(20, clevel)].map((n, i) => { const u = su[String(i + 1)] || su[i + 1]; return { name: `Level ${i + 1}`, max: n, used: u && typeof u === "object" ? Number(u.used || 0) : 0 }; });
+  let clevel = 0, casters = 0, slots = null, pact = null;
+  const suU = (pc.state || {}).spell_slots || {};
+  const PACT = { 1: [1, 1], 2: [2, 1], 3: [2, 2], 4: [2, 2], 5: [2, 3], 6: [2, 3], 7: [2, 4], 8: [2, 4], 9: [2, 5], 10: [2, 5], 11: [3, 5], 12: [3, 5], 13: [3, 5], 14: [3, 5], 15: [3, 5], 16: [3, 5], 17: [4, 5], 18: [4, 5], 19: [4, 5], 20: [4, 5] };
+  const num = (x) => { const mm = String(x).match(/^\d+/); return mm ? Number(mm[0]) : 0; };
+  for (const [c, p] of classes) {
+    const ct = (c.spellcasting || {}).caster_type, lv = p.level, cols = (((c.table || {})[String(lv)] || {}).columns) || {};
+    if (ct === "pact") { let n = num(cols["Spell Slots"]), l = num(cols["Slot Level"]); if (!(n && l)) [n, l] = PACT[Math.min(20, lv)]; pact = [n, l]; }
+    else if (["full", "half", "half-up", "third"].includes(ct)) {
+      casters++;
+      const own = {}; for (const [k, v] of Object.entries(cols)) if (/^\d+(st|nd|rd|th)$/.test(k)) own[num(k)] = num(v);
+      const top = Math.max(0, ...Object.entries(own).filter(([, v]) => v > 0).map(([k]) => Number(k)));
+      if (top) slots = Array.from({ length: top }, (_, i) => own[i + 1] || 0);
+      if (ct === "full") clevel += lv; else if (ct === "half") clevel += Math.floor(lv / 2); else if (ct === "half-up") clevel += Math.ceil(lv / 2); else clevel += Math.floor(lv / 3);
+    }
   }
+  if (casters > 1 || !slots) slots = clevel ? FULL_SLOTS[Math.min(20, clevel)] : null; // multiclass: the combined table
+  if (slots) out.slots = slots.map((n, i) => { const u = suU[String(i + 1)] || suU[i + 1]; return { name: `Level ${i + 1}`, max: n, used: u && typeof u === "object" ? Number(u.used || 0) : 0 }; }).filter((x) => x.max);
+  if (pact) out.slots = [...arr(out.slots), { name: `Pact Magic (Level ${pact[1]})`, max: pact[0], used: Number((suU.pact || {}).used || 0) }];
 
   // attacks and equipment
   const acts = [], eqs = [], attunedItems = [];
@@ -492,10 +505,13 @@ async function convert(pc, vault, opts = {}) {
   for (const [c, p] of classes) for (const [lv, ch] of Object.entries(p.choices || {})) if (Number(lv) <= p.level && ch && Array.isArray(ch["weapon-mastery"]))
     for (const ref of ch["weapon-mastery"]) { const wd = await vault.get(ref); const mk = arr(wd.mastery)[0]; wm.push({ name: (wd.name || nameFromSlug(slugOf(ref))) + (mk ? ` (${titleCase(String(mk))})` : "") }); }
   if (wm.length && !out.weapon_mastery) out.weapon_mastery = wm;
+  const resmap = {}; // resource id -> display name (Lay On Hands, Paladin's Smite, Channel Divinity...)
+  for (const src of [...classes.map(([c]) => c), ...(await Promise.all(classes.filter(([, p]) => p.subclass).map(([, p]) => vault.get(p.subclass)))), race])
+    for (const fl of Object.values((src && src.features_by_level) || {})) for (const ft of arr(fl)) for (const r of arr(ft && ft.resources)) if (r && r.id && r.name) { resmap[r.id] = r.name; for (const q of arr(r.equivalent_ids)) if (!(q in resmap)) resmap[q] = r.name; }
   const fu = (pc.state || {}).feature_uses || {}, cfn = {};
   for (const f of cf) cfn[f.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")] = f.name;
   const resC = [];
-  for (const [k, v] of Object.entries(fu)) { if (!v || typeof v !== "object" || !v.max) continue; const fid = k.split(":").pop(); resC.push({ name: cfn[fid] || titleCase(fid.replace(/-/g, " ")), max: Number(v.max), used: Number(v.used || 0) }); }
+  for (const [k, v] of Object.entries(fu)) { if (!v || typeof v !== "object" || !v.max) continue; const fid = k.split(":").pop(); resC.push({ name: resmap[k] || cfn[fid] || titleCase(fid.replace(/-/g, " ")), max: Number(v.max), used: Number(v.used || 0) }); }
   if (pips) { // use pips live in the section they belong to: species traits, feats, class features
     const slug = (x) => String(x || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
     const spkey = slug(race.name), featkeys = new Set(arr(out.feats).map((f) => slug(f.name))), spk = new Set(arr(out.species_traits).map((t) => slug(t.name)));
@@ -503,7 +519,7 @@ async function convert(pc, vault, opts = {}) {
     for (const [k, v] of Object.entries(fu)) {
       if (!v || typeof v !== "object" || !v.max) continue;
       const i = k.lastIndexOf(":"), pref = i >= 0 ? k.slice(0, i) : "", fid = i >= 0 ? k.slice(i + 1) : k;
-      const row = { name: cfn[fid] || titleCase(fid.replace(/-/g, " ")), max: Number(v.max), used: Number(v.used || 0) };
+      const row = { name: resmap[k] || cfn[fid] || titleCase(fid.replace(/-/g, " ")), max: Number(v.max), used: Number(v.used || 0) };
       if (pref && (pref === spkey || spkey.includes(pref) || spk.has(fid))) buckets.species_trait_uses.push(row);
       else if (featkeys.has(fid)) buckets.feat_uses.push(row);
       else buckets.class_feature_uses.push(row);
@@ -535,6 +551,25 @@ async function convert(pc, vault, opts = {}) {
       if (needAtt && it.attuned) {
         let txt = clean(firstText(d), 0).replace(/\s+/g, " ").trim(); if (txt.length > 260) txt = txt.slice(0, 260).replace(/\s+\S*$/, "") + "…";
         attunedItems.push({ name: e.name, desc: txt || "Attuned" });
+      }
+    }
+  }
+  // conditional damage riders (Sneak Attack...): a clickable damage roll of its own
+  for (const [c, p] of classes) {
+    const cols = (((c.table || {})[String(p.level)] || {}).columns) || {};
+    for (const src of [c, p.subclass ? await vault.get(p.subclass) : null]) {
+      for (const [lv, fl] of Object.entries((src && src.features_by_level) || {})) {
+        if (!(/^\d+$/.test(lv) && Number(lv) <= p.level)) continue;
+        for (const ft of arr(fl)) {
+          if (!ft || ft.activatable) continue;
+          for (const e of arr(ft.effects)) {
+            if (!e || e.kind !== "damage-bonus" || !e.condition || e.applies_to === "spell") continue;
+            let amount = String(e.amount || "").trim(); const mm = amount.match(/^column\('(.+?)'\)$/); if (mm) amount = String(cols[mm[1]] ?? "");
+            if (!/^\d+d\d+(\s*[+-]\s*\d+)?$/.test(amount)) continue;
+            const at = Array.isArray(e.applies_to) ? e.applies_to.join(", ") : (e.applies_to ? String(e.applies_to) : "weapon"); const dt = String(e.damage_type || "");
+            acts.push({ name: ft.name, damage: amount, type: dt.toLowerCase() === "weapon" ? "Weapon" : titleCase(dt), cost: "free", desc: `Once per turn (applies to ${at} attacks); ${e.condition}` });
+          }
+        }
       }
     }
   }
