@@ -605,6 +605,18 @@ def convert(pc, vault, short, classic=False, template=None):
                         for x in (v if isinstance(v, list) else [v]):
                             if isinstance(x, str): add(x, prepared=True)
     adds = []
+    def _fixed_names(x):   # plain spell names of an additional_spells block; {choose} rows are Builder picks
+        if isinstance(x, str): return [] if "=" in x else [x.title()]
+        if isinstance(x, list): return [n for y in x for n in _fixed_names(y)]
+        if isinstance(x, dict) and "choose" not in x: return [n for y in x.values() for n in _fixed_names(y)]
+        return []
+    for fd_ in feat_docs:   # Fey-Touched's Misty Step, Shadow-Touched's Invisibility...
+        for ent_ in (fd_.get("additional_spells") or []) if isinstance(fd_, dict) and isinstance(fd_.get("additional_spells"), list) else []:
+            for key_ in ("known", "prepared", "innate"):
+                blk_ = ent_.get(key_) if isinstance(ent_, dict) else None
+                for lv_, nm_ in (blk_.items() if isinstance(blk_, dict) else []):
+                    if lv_ != "_" and (not str(lv_).isdigit() or int(lv_) > level_total): continue
+                    adds += _fixed_names(nm_)
     for cdat, pcc in classes:
         for src in [cdat, vault.get(pcc.get("subclass"))]:
             for entry in (src.get("additional_spells") or []) if isinstance(src.get("additional_spells"), list) else []:

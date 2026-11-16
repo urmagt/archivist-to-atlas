@@ -426,6 +426,12 @@ async function convert(pc, vault, opts = {}) {
       }
     }
   }
+  const fixedNames = (x) => (typeof x === "string" ? (x.includes("=") ? [] : [x]) : Array.isArray(x) ? x.flatMap(fixedNames) : x && typeof x === "object" && !("choose" in x) ? Object.values(x).flatMap(fixedNames) : []);
+  for (const fd of featDocs) for (const entry of Array.isArray(fd && fd.additional_spells) ? fd.additional_spells : []) for (const key of ["known", "prepared", "innate"]) { // Fey-Touched's Misty Step, Shadow-Touched's Invisibility; {choose} rows are Builder picks
+    const blk = entry && entry[key]; if (!blk || typeof blk !== "object" || Array.isArray(blk)) continue;
+    for (const [lv, names] of Object.entries(blk)) { if (lv !== "_" && (!/^\d+$/.test(lv) || Number(lv) > levelTotal)) continue;
+      for (const n0 of fixedNames(names)) { const n = n0.replace(/\b\w/g, (c) => c.toUpperCase()); add(n.toLowerCase().replace(/['’]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""), true, true, n); } }
+  }
   // species (and subspecies) additional_spells: the entry named like the chosen lineage, else the only/unnamed one
   const flat = (x) => (typeof x === "string" ? [x] : Array.isArray(x) ? x.flatMap(flat) : x && typeof x === "object" ? Object.values(x).flatMap(flat) : []);
   const picks = new Set(Object.entries(oc).filter(([k, v]) => k.startsWith("race:") && typeof v === "string").map(([, v]) => v.toLowerCase().replace(/ /g, "-")));
