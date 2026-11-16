@@ -271,6 +271,8 @@ async function convert(pc, vault, opts = {}) {
   if (sens.length) out.senses = sens.join(", ");
   let langs = arr((race.languages || {}).fixed).map(titleCase);
   for (const [k, v] of Object.entries(oc)) if (k.startsWith("background:languages") || (k.startsWith("race:") && k.includes("language"))) langs.push(...arr(v).map(titleCase));
+  for (const [, p] of classes) for (const [lv, ch] of Object.entries(p.choices || {})) if (ch && typeof ch === "object" && Number(lv) <= p.level) // a language a feat lets you pick (Prodigy)
+    for (const [k, v] of Object.entries(ch)) if (k.startsWith("feat:") && /language/.test(k) && (typeof v === "string" || Array.isArray(v))) langs.push(...arr(v).map((x) => titleCase(String(x).replace(/-/g, " "))));
   langs.push(...arr((((pc.overrides || {}).languages) || {}).add).map((x) => titleCase(String(x).replace(/-/g, " "))));
   out.languages = [...new Set(langs)].join(", ");
   const res = effects.filter((e) => e.kind === "resistance").map((e) => titleCase(e.damage_type));
@@ -378,6 +380,9 @@ async function convert(pc, vault, opts = {}) {
   for (const [, p] of classes) for (const [lv, ch] of Object.entries(p.choices || {}).sort((a, b) => a[0] - b[0])) {
     if (Number(lv) <= p.level && ch && ch.feat) {
       let extra = ""; if (ch["feat:asi"] && typeof ch["feat:asi"] === "object") extra = Object.entries(ch["feat:asi"]).map(([a, n]) => `+${n} ${titleCase(a)}`).join(", ");
+      { const bits = extra ? [extra] : []; // the feat's other picks (Elemental Adept's damage type, Keen Mind's skill...); spells and abilities are shown elsewhere
+        for (const [k, v] of Object.entries(ch)) if (k.startsWith("feat:") && k !== "feat:asi" && !/cantrip|spell|level\d|ability|list|mode$/.test(k)) bits.push(...arr(v).filter((x) => typeof x === "string" && !x.includes("_")).map((x) => titleCase(x.replace(/-/g, " "))));
+        extra = bits.join(", "); }
       feats.push(await featEntry(ch.feat, extra));
     }
   }

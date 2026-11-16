@@ -415,6 +415,12 @@ def convert(pc, vault, short, classic=False, template=None):
     for k, v in oc.items():
         if k.startswith("background:languages") or (k.startswith("race:") and "language" in k):
             langs += [str(x).title() for x in (v if isinstance(v, list) else [v])]
+    for _c, pcc_ in classes:   # a language a feat lets you pick (Prodigy)
+        for lv_, ch_ in (pcc_.get("choices") or {}).items():
+            if isinstance(ch_, dict) and int(lv_) <= pcc_["level"]:
+                for k_, v_ in ch_.items():
+                    if str(k_).startswith("feat:") and re.search(r"language", k_) and isinstance(v_, (str, list)):
+                        langs += [str(x).replace("-", " ").title() for x in ([v_] if isinstance(v_, str) else v_)]
     langs += [str(x).replace("-", " ").title() for x in (((pc.get("overrides") or {}).get("languages") or {}).get("add") or [])]
     out["languages"] = ", ".join(dict.fromkeys(langs))
     res = [e["damage_type"].title() for e in effects if e.get("kind") == "resistance"]
@@ -539,6 +545,11 @@ def convert(pc, vault, short, classic=False, template=None):
             if int(lv) <= pcc["level"] and isinstance(ch, dict) and ch.get("feat"):
                 extra = ""
                 if isinstance(ch.get("feat:asi"), dict): extra = ", ".join(f"+{n} {a.title()}" for a, n in ch["feat:asi"].items())
+                bits_ = [extra] if extra else []
+                for k_, v_ in ch.items():   # the feat's other picks (Elemental Adept's damage type, Keen Mind's skill...); spells and abilities are shown elsewhere
+                    if str(k_).startswith("feat:") and k_ != "feat:asi" and not re.search(r"cantrip|spell|level\d|ability|list|mode$", k_):
+                        bits_ += [str(x).replace("-", " ").title() for x in ([v_] if isinstance(v_, str) else v_ if isinstance(v_, list) else []) if isinstance(x, str) and "_" not in x]
+                extra = ", ".join(bits_)
                 feats.append(feat_entry(ch["feat"], extra))
     for k, v in oc.items():
         if k.startswith("race:") and "feat" in k and isinstance(v, str) and v: feats.append(feat_entry(v, ""))
