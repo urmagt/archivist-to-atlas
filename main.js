@@ -1,6 +1,7 @@
-const { Plugin, Notice, PluginSettingTab, Setting, TFile } = require("obsidian");
+const { Plugin, Notice, PluginSettingTab, Setting, TFile, Modal } = require("obsidian");
 const yaml = require("js-yaml");
 const { convert, PRESERVE_ON_UPDATE } = require("./converter");
+const addSpells = require("./addspells");
 
 const DEFAULTS = { template: "current", linkSpells: true, preparedTracker: false, classic: false, short: 0, hitDiceKey: "", outputFolder: "" };
 const FM = /^---\n([\s\S]*?)\n---\n?/;
@@ -46,6 +47,8 @@ module.exports = class ArchivistToAtlas extends Plugin {
     this.addSettingTab(new Tab(this.app, this));
     this.addCommand({ id: "convert-character", name: "Convert this Archivist character to an Atlas statblock",
       checkCallback: (checking) => { const f = this.app.workspace.getActiveFile(); if (!f || f.extension !== "md") return false; if (!checking) this.run(f); return true; } });
+    this.addCommand({ id: "add-class-spells", name: "Add all spells of a class to this Archivist character",
+      checkCallback: (checking) => { const f = this.app.workspace.getActiveFile(); if (!f || f.extension !== "md") return false; const fm = (this.app.metadataCache.getFileCache(f) || {}).frontmatter || {}; if (fm["archivist-type"] !== "pc") return false; if (!checking) this.addClassSpells(f); return true; } });
     this.registerEvent(this.app.workspace.on("file-menu", (menu, file) => {
       if (!(file instanceof TFile) || file.extension !== "md") return;
       const fm = (this.app.metadataCache.getFileCache(file) || {}).frontmatter || {};
@@ -82,7 +85,56 @@ module.exports = class ArchivistToAtlas extends Plugin {
     } catch (e) { console.error(e); new Notice("Conversion failed: " + e.message); }
   }
   async saveSettings() { await this.saveData(this.settings); }
+  async addClassSpells(file) {
+    try {
+      const text = await this.app.vault.read(file);
+      let m = null; for (const x of text.matchAll(BLOCK)) if (x[1] === "pc") { m = x; break; }
+      if (!m) return new Notice("No Archivist character (pc block) found in this note.");
+      const pc = yaml.load(m[2]); const idx = new VaultIndex(this.app); await idx.build();
+      const classes = [];
+      for (const c of pc.class || []) { const d = await idx.get(c.name); if (d && d.spellcasting) classes.push({ ref: c.name, level: Number(c.level || 1), doc: d }); }
+      if (!classes.length) return new Notice("None of this character's classes has spellcasting.");
+      new Notice("Reading the compendium spells…");
+      const spells = [];
+      const files = this.app.vault.getMarkdownFiles().filter((f) => { const fm = (this.app.metadataCache.getFileCache(f) || {}).frontmatter || {}; return fm.archivist === true && fm.entity_type === "spell" && fm.slug; });
+      for (let i = 0; i < files.length; i += 50) await Promise.all(files.slice(i, i + 50).map(async (f) => {
+        const fm = (this.app.metadataCache.getFileCache(f) || {}).frontmatter || {}; const t = await this.app.vault.cachedRead(f);
+        for (const x of t.matchAll(BLOCK)) if (x[1] === "spell") { try { const d = yaml.load(x[2]) || {}; spells.push({ slug: String(d.slug || fm.slug), name: d.name || fm.name, level: d.level || 0, classes: d.classes || [], edition: String(d.edition || ""), compendium: String(fm.compendium || "") }); } catch (e) {} break; }
+      }));
+      new AddSpellsModal(this.app, classes, spells, async (ci, opts) => {
+        const c = classes[ci], add = addSpells.plan(pc, c.doc, spells, opts);
+        if (!add.length) return new Notice("Nothing to add: every matching spell is already on the character.");
+        addSpells.apply(pc, c.ref, add, classes.length > 1);
+        const dumped = yaml.dump(pc, { lineWidth: -1, noRefs: true, quotingType: '"' }).replace(/\n$/, "");
+        const cur = await this.app.vault.read(file);
+        await this.app.vault.modify(file, cur.replace(m[0], "```pc\n" + dumped + "\n```"));
+        new Notice(`Added ${add.length} ${c.doc.name} spell(s). Reopen the sheet if it does not refresh.`, 10000);
+      }).open();
+    } catch (e) { console.error(e); new Notice("Could not add spells: " + e.message); }
+  }
 };
+
+class AddSpellsModal extends Modal {
+  constructor(app, classes, spells, onSubmit) { super(app); this.classes = classes; this.spells = spells; this.onSubmit = onSubmit; this.ci = 0; this.cantrips = true; this.editions = new Set(); this.comps = new Set(); this.max = null; }
+  onOpen() { this.render(); }
+  render() {
+    const { contentEl: c } = this; c.empty();
+    c.createEl("h3", { text: "Add all spells of a class" });
+    const cl = this.classes[this.ci], cname = String(cl.doc.name || "").toLowerCase();
+    if (this.classes.length > 1) new Setting(c).setName("Class").addDropdown((d) => { this.classes.forEach((x, i) => d.addOption(String(i), x.doc.name)); d.setValue(String(this.ci)).onChange((v) => { this.ci = Number(v); this.max = null; this.render(); }); });
+    if (this.max == null) this.max = addSpells.maxSpellLevel(cl.doc, cl.level);
+    new Setting(c).setName("Highest spell level").setDesc("Defaults to the highest level this class has slots for at its level.").addText((t) => t.setValue(String(this.max)).onChange((v) => { this.max = Math.max(0, Math.min(9, Number(v) || 0)); }));
+    new Setting(c).setName("Include cantrips").addToggle((t) => t.setValue(this.cantrips).onChange((v) => { this.cantrips = v; }));
+    const mine = this.spells.filter((s) => (s.classes || []).some((x) => addSpells.clsName(x) === cname));
+    const eds = [...new Set(mine.map((s) => s.edition))].sort(), comps = [...new Set(mine.map((s) => s.compendium))].sort();
+    c.createEl("h4", { text: "Editions (none ticked = all)" });
+    for (const e of eds) new Setting(c).setName(e || "(no edition)").addToggle((t) => t.setValue(this.editions.has(e)).onChange((v) => { v ? this.editions.add(e) : this.editions.delete(e); }));
+    c.createEl("h4", { text: "Compendiums (none ticked = all)" });
+    for (const k of comps) new Setting(c).setName(`${k || "(none)"} · ${mine.filter((s) => s.compendium === k).length}`).addToggle((t) => t.setValue(this.comps.has(k)).onChange((v) => { v ? this.comps.add(k) : this.comps.delete(k); }));
+    new Setting(c).addButton((b) => b.setButtonText("Add spells").setCta().onClick(async () => { this.close(); await this.onSubmit(this.ci, { maxLevel: this.max, cantrips: this.cantrips, editions: this.editions, compendiums: this.comps }); }));
+  }
+  onClose() { this.contentEl.empty(); }
+}
 
 class Tab extends PluginSettingTab {
   constructor(app, plugin) { super(app, plugin); this.plugin = plugin; }
