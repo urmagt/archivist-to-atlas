@@ -40,16 +40,6 @@ class VaultIndex {
   }
 }
 
-// an ```atlas block that is not valid YAML (an unindented quoted line under `notes_2: |`...): take each known key and
-// everything up to the next known key as its text, rather than losing the whole block
-const LENIENT_KEYS = ["height", "weight", "eyes", "hair", "skin", "appearance", "personality", "ideals", "bonds", "flaws", "allies", "notes", "notes_2", "backstory", "description", "alignment", "age"];
-function lenientBio(raw) {
-  const out = {}, re = new RegExp(`^(${LENIENT_KEYS.join("|")}):[ \\t]*(.*)$`); let key = null, buf = [];
-  const flush = () => { if (key === null) return; let t = buf.join("\n").replace(/^\n+|\n+$/g, ""); t = t.replace(/^[|>][+-]?\s*\n?/, "").trim(); if (t.length > 1 && t[0] === t[t.length - 1] && "\"'".includes(t[0])) t = t.slice(1, -1); t = t.split("\n").map((l, i) => (i ? l.trim() : l)).join("\n").trim(); if (t) out[key] = t; };
-  for (const line of raw.split("\n")) { const m = line.match(re); if (m) { flush(); key = m[1]; buf = [m[2]]; } else if (key !== null) buf.push(line); }
-  flush(); return out;
-}
-
 module.exports = class ArchivistToAtlas extends Plugin {
   async onload() {
     this.settings = Object.assign({}, DEFAULTS, await this.loadData());
@@ -68,7 +58,7 @@ module.exports = class ArchivistToAtlas extends Plugin {
       const text = await this.app.vault.read(file);
       let pc = null; for (const m of text.matchAll(BLOCK)) if (m[1] === "pc") { pc = yaml.load(m[2]); break; }
       if (!pc) return new Notice("No Archivist character (pc block) found in this note.");
-      { const fmx = (this.app.metadataCache.getFileCache(file) || {}).frontmatter || {}; if (fmx["archivist-portrait"]) pc._portrait = fmx["archivist-portrait"]; let fmb = { ...fmx }; for (const m of text.matchAll(BLOCK)) if (m[1] === "atlas" || m[1] === "atlas-bio") { try { Object.assign(fmb, yaml.load(m[2]) || {}); } catch (e) { Object.assign(fmb, lenientBio(m[2])); } }
+      { const fmx = (this.app.metadataCache.getFileCache(file) || {}).frontmatter || {}; if (fmx["archivist-portrait"]) pc._portrait = fmx["archivist-portrait"]; let fmb = { ...fmx }; for (const m of text.matchAll(BLOCK)) if (m[1] === "atlas" || m[1] === "atlas-bio") { try { Object.assign(fmb, yaml.load(m[2]) || {}); } catch (e) {} }
         pc._bio = {}; for (const k of ["height", "weight", "eyes", "hair", "skin", "appearance", "personality", "ideals", "bonds", "flaws", "allies", "notes", "notes_2", "backstory", "description", "alignment", "age"]) if (fmb[k]) pc._bio[k] = fmb[k]; if (pc.notes && !pc._bio.notes_2) pc._bio.notes_2 = String(pc.notes).trim(); }
       const idx = new VaultIndex(this.app); await idx.build();
       const { out, warn } = await convert(pc, idx, { short: this.settings.short, classic: this.settings.classic, template: this.settings.classic ? "classic" : (this.settings.template || "current"), hitDiceKey: this.settings.hitDiceKey, linkSpells: this.settings.linkSpells, preparedTracker: this.settings.preparedTracker });
