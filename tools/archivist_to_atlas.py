@@ -403,6 +403,7 @@ def convert(pc, vault, short, classic=False, template=None):
     for _t, o_ in chosen:   # Drow: "The range of your Darkvision increases to 120 feet"
         mm_ = re.search(r"(?i)darkvision increases to (\d+) feet", str(o_.get("description") or ""))
         if mm_ and (not dv or int(mm_.group(1)) > int(dv)): dv = int(mm_.group(1))
+    sens_pre = list(sens)
     senses_ = {"darkvision": int(dv)} if dv else {}
     for e in effects:   # sense effects: the largest range per sense wins (never a sum)
         if e.get("kind") == "sense":
@@ -463,7 +464,7 @@ def convert(pc, vault, short, classic=False, template=None):
                 d = clean(first_text(f), lim)
                 got[f.get("id") or f["name"]] = {"name": f["name"], "desc": d, "_act": f.get("action") or f.get("action_cost")} if d else None
         return [v for v in got.values() if v]
-    cf = []
+    cf = []; pool_docs = []
     for cdat, pcc in classes:
         _start = len(cf)
         cf += feat_entries(cdat.get("features_by_level") or {}, pcc["level"])
@@ -491,6 +492,7 @@ def convert(pc, vault, short, classic=False, template=None):
                     try: od = vault.get(f"[[{pk}]]", "optional-feature")
                     except Exception: od = None
                     if not od or not od.get("name"): continue
+                    pool_docs.append(od)
                     cf.append({"name": f"{pools[pid].get('label', pid)}: {od['name']}".replace("Artificer Infusions: ", "Infusion: "), "desc": clean(first_text(od) or od.get("description", ""), lim)})
     out["class_features"] = cf
     ba, rx = [], []
@@ -571,6 +573,18 @@ def convert(pc, vault, short, classic=False, template=None):
             try: init_bonus += _amt(e)
             except Exception: pass
     out["initiative"] = m["dex"] + init_bonus
+    # senses from feats (Skulker: Blindsight), invocations (Devil's Sight), class features and worn items
+    for e in init_effs + [e_ for d_ in pool_docs for e_ in (d_.get("effects") or []) if isinstance(e_, dict)]:
+        if isinstance(e, dict) and e.get("kind") == "sense" and str(e.get("subject") or "self") == "self":
+            t_ = str(e.get("type") or e.get("sense") or "").lower(); r_ = int(e.get("range") or 0)
+            if t_ and r_ > senses_.get(t_, 0): senses_[t_] = r_
+    for d_ in feat_docs + pool_docs:   # a feat that only states its sense in text ("You have Blindsight with a range of 10 feet")
+        if any(isinstance(e_, dict) and e_.get("kind") == "sense" for e_ in (d_.get("effects") or [])): continue
+        for mm_ in re.finditer(r"(?i)\b(blindsight|darkvision|tremorsense|truesight)\b[^.]{0,40}?\brange of (\d+) feet", feat_text(d_) if "benefits" in d_ else first_text(d_)):
+            t_, r_ = mm_.group(1).lower(), int(mm_.group(2))
+            if r_ > senses_.get(t_, 0): senses_[t_] = r_
+    _all_s = sens_pre + [f"{t_.title()} {r_} ft" for t_, r_ in senses_.items()]
+    if _all_s: out["senses"] = ", ".join(_all_s)
 
     # ---- spells
     spells = {}   # slug -> dict(level, prepared)

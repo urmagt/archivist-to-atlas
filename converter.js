@@ -264,6 +264,7 @@ async function convert(pc, vault, opts = {}) {
   if (pips) { out.passive_perception = pp; out.passive_investigation = passive("investigation", "int"); out.passive_insight = passive("insight", "wis"); }
   let dv = (race.vision || {}).darkvision;
   for (const [, o] of chosen) { const mm = String(o.description || "").match(/darkvision increases to (\d+) feet/i); if (mm && (!dv || Number(mm[1]) > Number(dv))) dv = Number(mm[1]); } // Drow
+  const sensPre = [...sens];
   const sensesU = dv ? { darkvision: Number(dv) } : {};
   for (const e of effects) if (e.kind === "sense") { const t = String(e.type || e.sense || "").toLowerCase(), r = Number(e.range || 0); if (t && r > (sensesU[t] || 0)) sensesU[t] = r; } // largest range per sense
   for (const [t, r] of Object.entries(sensesU)) sens.push(`${titleCase(t)} ${r} ft`);
@@ -307,7 +308,7 @@ async function convert(pc, vault, opts = {}) {
     }
     return [...got.values()].filter(Boolean);
   };
-  let cf = [];
+  let cf = []; const poolDocs = [];
   for (const [c, p] of classes) {
     const start = cf.length;
     cf.push(...featEntries(c.features_by_level, p.level));
@@ -335,6 +336,7 @@ async function convert(pc, vault, opts = {}) {
         for (const pk of picks) {
           let od = {}; try { od = await vault.get(`[[${pk}]]`, "optional-feature"); } catch (e) {}
           if (!od || !od.name) continue;
+          poolDocs.push(od);
           cf.push({ name: `${pools[pid].label || pid}: ${od.name}`.replace("Artificer Infusions: ", "Infusion: "), desc: clean(firstText(od), short) });
         }
       }
@@ -398,6 +400,13 @@ async function convert(pc, vault, opts = {}) {
   let initBonus = 0;
   for (const e of initEffs) if (e && e.kind === "initiative-bonus" && String(e.subject || "self") === "self") { try { initBonus += amt(e); } catch (x) {} }
   out.initiative = m.dex + initBonus;
+  // senses from feats (Skulker: Blindsight), invocations (Devil's Sight), class features and worn items
+  for (const e of [...initEffs, ...poolDocs.flatMap((d) => arr(d.effects))]) if (e && e.kind === "sense" && String(e.subject || "self") === "self") { const t = String(e.type || e.sense || "").toLowerCase(), r = Number(e.range || 0); if (t && r > (sensesU[t] || 0)) sensesU[t] = r; }
+  for (const d of [...featDocs, ...poolDocs]) { // a feat that only states its sense in text ("You have Blindsight with a range of 10 feet")
+    if (arr(d.effects).some((e) => e && e.kind === "sense")) continue;
+    for (const mm of featText(d).matchAll(/\b(blindsight|darkvision|tremorsense|truesight)\b[^.]{0,40}?\brange of (\d+) feet/gi)) { const t = mm[1].toLowerCase(), r = Number(mm[2]); if (r > (sensesU[t] || 0)) sensesU[t] = r; }
+  }
+  const allS = [...sensPre, ...Object.entries(sensesU).map(([t, r]) => `${titleCase(t)} ${r} ft`)]; if (allS.length) out.senses = allS.join(", ");
 
   // spells
   const spells = new Map();
