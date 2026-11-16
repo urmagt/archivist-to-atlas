@@ -168,9 +168,13 @@ async function convert(pc, vault, opts = {}) {
   let walk = (race.speed || {}).walk || 30;
   const modes = {};
   for (const [k, v] of Object.entries(race.speed || {})) if (k !== "walk" && k !== "hover" && v) modes[k] = v;
+  for (const [, o] of chosen) { // a lineage option that only says "Your Speed increases to 35 feet" in its text (Wood Elf)
+    if (arr(o.effects).some((e) => e.kind === "speed-bonus")) continue;
+    const mm = String(o.description || "").match(/\bspeed increases to (\d+) feet/i); if (mm) walk = Math.max(walk, Number(mm[1]));
+  }
   for (const e of effects) {
     if (e.kind === "speed-bonus" && ["fly", "swim", "climb", "burrow"].includes(e.mode)) modes[e.mode] = e.equal_to === "walk" ? walk : (e.value != null ? e.value : modes[e.mode] || 0);
-    else if (e.kind === "speed-bonus" && e.mode === "walk" && !e.condition) walk += e.value || 0;
+    else if (e.kind === "speed-bonus" && e.mode === "walk" && !e.condition) walk = e.set ? Math.max(walk, e.value || 0) : walk + (e.value || 0);
   }
   if (pips) { // the pips sheet's speed is a plain number (walking); other modes go to the Other actions list
     out.speed = Number(walk);
@@ -258,7 +262,11 @@ async function convert(pc, vault, opts = {}) {
   const passive = (skill, ab) => 10 + m[ab] + (prof.has(skill) || expert.has(skill) ? pb * (expert.has(skill) ? 2 : 1) : 0);
   const sens = pips ? [] : [`Passive Perception ${pp}`];
   if (pips) { out.passive_perception = pp; out.passive_investigation = passive("investigation", "int"); out.passive_insight = passive("insight", "wis"); }
-  const dv = (race.vision || {}).darkvision; if (dv) sens.push(`Darkvision ${dv} ft`);
+  let dv = (race.vision || {}).darkvision;
+  for (const [, o] of chosen) { const mm = String(o.description || "").match(/darkvision increases to (\d+) feet/i); if (mm && (!dv || Number(mm[1]) > Number(dv))) dv = Number(mm[1]); } // Drow
+  const sensesU = dv ? { darkvision: Number(dv) } : {};
+  for (const e of effects) if (e.kind === "sense") { const t = String(e.type || e.sense || "").toLowerCase(), r = Number(e.range || 0); if (t && r > (sensesU[t] || 0)) sensesU[t] = r; } // largest range per sense
+  for (const [t, r] of Object.entries(sensesU)) sens.push(`${titleCase(t)} ${r} ft`);
   if (sens.length) out.senses = sens.join(", ");
   let langs = arr((race.languages || {}).fixed).map(titleCase);
   for (const [k, v] of Object.entries(oc)) if (k.startsWith("background:languages") || (k.startsWith("race:") && k.includes("language"))) langs.push(...arr(v).map(titleCase));

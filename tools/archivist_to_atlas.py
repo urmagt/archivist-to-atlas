@@ -280,10 +280,14 @@ def convert(pc, vault, short, classic=False, template=None):
     # ---- speed
     walk = (race.get("speed") or {}).get("walk", 30)
     modes = {k: v for k, v in (race.get("speed") or {}).items() if k not in ("walk", "hover") and v}
+    for _t, o_ in chosen:   # a lineage option that only says "Your Speed increases to 35 feet" in its text (Wood Elf)
+        if not any(e_.get("kind") == "speed-bonus" for e_ in (o_.get("effects") or [])):
+            mm_ = re.search(r"(?i)\bspeed increases to (\d+) feet", str(o_.get("description") or ""))
+            if mm_: walk = max(walk, int(mm_.group(1)))
     for e in effects:
         if e.get("kind") == "speed-bonus" and e.get("mode") in ("fly", "swim", "climb", "burrow"):
             modes[e["mode"]] = walk if e.get("equal_to") == "walk" else e.get("value", modes.get(e["mode"], 0))
-        elif e.get("kind") == "speed-bonus" and e.get("mode") == "walk" and not e.get("condition"): walk += e.get("value", 0)
+        elif e.get("kind") == "speed-bonus" and e.get("mode") == "walk" and not e.get("condition"): walk = max(walk, e.get("value", 0)) if e.get("set") else walk + e.get("value", 0)
     if pips:   # the pips sheet's speed is a plain number (walking); other modes go to the Other actions list
         out["speed"] = int(walk)
         if modes: out["otheractions"] = [{"name": "Movement", "desc": ", ".join(f"{k.title()} {v} ft" for k, v in modes.items())}]
@@ -396,9 +400,15 @@ def convert(pc, vault, short, classic=False, template=None):
     sens = [] if pips else [f"Passive Perception {pp}"]
     if pips: out["passive_perception"], out["passive_investigation"], out["passive_insight"] = pp, passive("investigation", "int"), passive("insight", "wis")
     dv = (race.get("vision") or {}).get("darkvision")
-    if dv: sens.append(f"Darkvision {dv} ft")
-    for e in effects:
-        if e.get("kind") == "sense": sens.append(f"{str(e.get('sense', '')).title()} {e.get('range', '')} ft".strip())
+    for _t, o_ in chosen:   # Drow: "The range of your Darkvision increases to 120 feet"
+        mm_ = re.search(r"(?i)darkvision increases to (\d+) feet", str(o_.get("description") or ""))
+        if mm_ and (not dv or int(mm_.group(1)) > int(dv)): dv = int(mm_.group(1))
+    senses_ = {"darkvision": int(dv)} if dv else {}
+    for e in effects:   # sense effects: the largest range per sense wins (never a sum)
+        if e.get("kind") == "sense":
+            t_ = str(e.get("type") or e.get("sense") or "").lower(); r_ = int(e.get("range") or 0)
+            if t_ and r_ > senses_.get(t_, 0): senses_[t_] = r_
+    sens += [f"{t_.title()} {r_} ft" for t_, r_ in senses_.items()]
     if sens: out["senses"] = ", ".join(sens)
     langs = [str(x).title() for x in (race.get("languages") or {}).get("fixed", []) or []]
     for k, v in oc.items():
