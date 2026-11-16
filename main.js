@@ -59,7 +59,7 @@ module.exports = class ArchivistToAtlas extends Plugin {
       let pc = null; for (const m of text.matchAll(BLOCK)) if (m[1] === "pc") { pc = yaml.load(m[2]); break; }
       if (!pc) return new Notice("No Archivist character (pc block) found in this note.");
       { const fmx = (this.app.metadataCache.getFileCache(file) || {}).frontmatter || {}; if (fmx["archivist-portrait"]) pc._portrait = fmx["archivist-portrait"]; let fmb = { ...fmx }; for (const m of text.matchAll(BLOCK)) if (m[1] === "atlas" || m[1] === "atlas-bio") { try { Object.assign(fmb, yaml.load(m[2]) || {}); } catch (e) {} }
-        pc._bio = {}; for (const k of ["height", "weight", "eyes", "hair", "skin", "appearance", "personality", "ideals", "bonds", "flaws", "allies", "notes", "backstory", "description", "alignment", "age"]) if (fmb[k]) pc._bio[k] = fmb[k]; }
+        pc._bio = {}; for (const k of ["height", "weight", "eyes", "hair", "skin", "appearance", "personality", "ideals", "bonds", "flaws", "allies", "notes", "notes_2", "backstory", "description", "alignment", "age"]) if (fmb[k]) pc._bio[k] = fmb[k]; if (pc.notes && !pc._bio.notes_2) pc._bio.notes_2 = String(pc.notes).trim(); }
       const idx = new VaultIndex(this.app); await idx.build();
       const { out, warn } = await convert(pc, idx, { short: this.settings.short, classic: this.settings.classic, template: this.settings.classic ? "classic" : (this.settings.template || "current"), hitDiceKey: this.settings.hitDiceKey, linkSpells: this.settings.linkSpells, preparedTracker: this.settings.preparedTracker });
       const folder = this.settings.outputFolder ? this.settings.outputFolder.replace(/\/$/, "") : (file.parent && file.parent.path !== "/" ? file.parent.path : "");

@@ -923,7 +923,7 @@ def _str(dumper, s):
     return dumper.represent_scalar("tag:yaml.org,2002:str", s)
 D.add_representer(str, _str)
 
-BIO_KEYS = {"alignment", "age", "height", "weight", "eyes", "hair", "skin", "appearance", "personality", "allies", "notes", "description"}
+BIO_KEYS = {"alignment", "age", "height", "weight", "eyes", "hair", "skin", "appearance", "personality", "allies", "notes", "notes_2", "description"}
 PRESERVE_ON_UPDATE = {"image", "description", "xp", "alignment", "heroic_inspiration", "age", "height", "weight", "eyes",
     "hair", "skin", "appearance", "personality", "ideals", "bonds", "flaws", "allies", "notes", "notes_2", "damage_vulnerabilities",
     "damage_immunities", "condition_immunities", "weapon_mastery"}
@@ -946,7 +946,8 @@ def main():
     if fm.get("archivist-portrait"): pc["_portrait"] = fm["archivist-portrait"]
     for kb in ("atlas", "atlas-bio"):   # or a fenced ```atlas block anywhere in the note body: key: value lines
         if isinstance(blocks.get(kb), dict): fm = {**fm, **blocks[kb]}
-    pc["_bio"] = {k: fm[k] for k in ("height", "weight", "eyes", "hair", "skin", "appearance", "personality", "ideals", "bonds", "flaws", "allies", "notes", "backstory", "description", "alignment", "age") if fm.get(k)}
+    pc["_bio"] = {k: fm[k] for k in ("height", "weight", "eyes", "hair", "skin", "appearance", "personality", "ideals", "bonds", "flaws", "allies", "notes", "notes_2", "backstory", "description", "alignment", "age") if fm.get(k)}
+    if pc.get("notes") and not pc["_bio"].get("notes_2"): pc["_bio"]["notes_2"] = str(pc["notes"]).strip()   # the sheet's own Notes tab text
     vault = Vault(a.vault)
     print(f"Indexed {len(vault.index)} compendium notes.")
     global LINK_SPELLS, PREPARED_TRACKER

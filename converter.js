@@ -642,7 +642,7 @@ async function convert(pc, vault, opts = {}) {
   return { out, warn };
 }
 
-const BIO_KEYS = new Set(["alignment", "age", "height", "weight", "eyes", "hair", "skin", "appearance", "personality", "allies", "notes", "description"]);
+const BIO_KEYS = new Set(["alignment", "age", "height", "weight", "eyes", "hair", "skin", "appearance", "personality", "allies", "notes", "notes_2", "description"]);
 const PRESERVE_ON_UPDATE = new Set(["image", "description", "xp", "alignment", "heroic_inspiration", "age", "height", "weight", "eyes", "hair", "skin",
   "appearance", "personality", "ideals", "bonds", "flaws", "allies", "notes", "notes_2", "damage_vulnerabilities", "damage_immunities", "condition_immunities", "weapon_mastery"]);
 module.exports = { convert, PRESERVE_ON_UPDATE, slugOf };
