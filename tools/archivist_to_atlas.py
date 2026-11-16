@@ -298,29 +298,36 @@ def convert(pc, vault, short, classic=False, template=None):
 
     # ---- skills and saves
     prof, expert = set(), set()
+    prof_src = {}   # skill -> where it came from, to warn when two sources grant the same skill (one pick is then wasted)
+    def _src(skills, where):
+        for sk_ in skills: prof_src.setdefault(sk_, []).append(where)
     sk = pc.get("skills") or {}
     prof |= {s.replace("-", "_") for s in sk.get("proficient", []) or []}
     expert |= {s.replace("-", "_") for s in sk.get("expertise", []) or []}
-    for s in bg.get("skill_proficiencies", []) or []: prof.add(str(s).replace("-", "_").replace(" ", "_").lower())
+    for s in bg.get("skill_proficiencies", []) or []: prof.add(str(s).replace("-", "_").replace(" ", "_").lower()); _src([str(s).replace("-", "_").replace(" ", "_").lower()], "your background")
     for cdat, pcc in classes:
         for lv, ch in (pcc.get("choices") or {}).items():
             if int(lv) <= pcc["level"] and isinstance(ch, dict):
                 for key, v in ch.items():
-                    if key == "skills" and isinstance(v, list): prof |= {s.replace("-", "_") for s in v}
+                    if key == "skills" and isinstance(v, list): prof |= {s.replace("-", "_") for s in v}; _src([s.replace("-", "_") for s in v], "your class skill picks")
                     if re.search(r"expertise", str(key), re.I) and isinstance(v, (str, list)):   # Rogue/Bard/Ranger expertise picks (expertise, expertise-2, feat:expertise...)
                         expert |= {str(x).replace("-", "_") for x in ([v] if isinstance(v, str) else v) if isinstance(x, str) and not x.startswith("[[")}
                     if key.endswith("skill") and isinstance(v, (str, list)):
-                        prof |= {s.replace("-", "_") for s in ([v] if isinstance(v, str) else v)}
+                        prof |= {s.replace("-", "_") for s in ([v] if isinstance(v, str) else v)}; _src([s.replace("-", "_") for s in ([v] if isinstance(v, str) else v)], f"a pick ({key})")
     for k, v in oc.items():
         if re.search(r"expertise", k, re.I) and isinstance(v, (str, list)):
             expert |= {str(x).replace("-", "_") for x in ([v] if isinstance(v, str) else v) if isinstance(x, str)}
         if k.startswith(("race:", "background:")) and k.endswith("skill") and isinstance(v, (str, list)):
+            prof |= {str(x).replace("-", "_") for x in ([v] if isinstance(v, str) else v)}; _src([str(x).replace("-", "_") for x in ([v] if isinstance(v, str) else v)], f"a pick ({k})")
+        if re.match(r"(?:race|background):replace-skill", k) and isinstance(v, (str, list)):   # a skill picked instead of one you already had (Sage's Arcana when you already have it)
             prof |= {str(x).replace("-", "_") for x in ([v] if isinstance(v, str) else v)}
     for e in effects:
         if e.get("kind") == "proficiency" and e.get("proficiency_type") == "skill":
             prof.add(str(e["value"]).replace("-", "_"))
             if e.get("expertise"): expert.add(str(e["value"]).replace("-", "_"))
     prof |= expert   # expertise implies proficiency
+    for sk_, wh_ in prof_src.items():
+        if len(wh_) > 1 and sk_ not in expert: warn.append(f"{sk_.replace('_', ' ').title()} is granted twice ({' and '.join(wh_)}): Archivist does not stop you picking it twice, so one pick is wasted")
     half = any(e.get("kind") == "half-proficiency" for e in effects) or any(
         e.get("kind") == "half-proficiency" for _c, _p in classes for f_ in ((_c.get("features_by_level") or {}).values()) for ft in (f_ if isinstance(f_, list) else []) for e in (ft.get("effects") or []))
     for k in SKILLS:
@@ -422,7 +429,7 @@ def convert(pc, vault, short, classic=False, template=None):
     if sens: out["senses"] = ", ".join(sens)
     langs = [str(x).title() for x in (race.get("languages") or {}).get("fixed", []) or []]
     for k, v in oc.items():
-        if k.startswith("background:languages") or (k.startswith("race:") and "language" in k):
+        if k.startswith("background:languages") or re.match(r"(?:race|background):replace-language", k) or (k.startswith("race:") and "language" in k):
             langs += [str(x).title() for x in (v if isinstance(v, list) else [v])]
     for _c, pcc_ in classes:   # a language a feat lets you pick (Prodigy)
         for lv_, ch_ in (pcc_.get("choices") or {}).items():
@@ -455,7 +462,7 @@ def convert(pc, vault, short, classic=False, template=None):
     for t in bg.get("tool_proficiencies", []) or []:
         if isinstance(t, dict): tools += [str(x) for x in t.get("items", []) or []]
     for k, v in oc.items():
-        if re.match(r"background:tool", k) or (k.startswith("race:") and "tool" in k):
+        if re.match(r"background:tool", k) or re.match(r"(?:race|background):replace-tool", k) or (k.startswith("race:") and "tool" in k):
             tools += [name_from_slug(slug_of(str(x))) if "_" in str(x) else str(x).replace("-", " ").title().replace("'S", "'s") for x in (v if isinstance(v, list) else [v])]
     for cdat, pcc in classes:
         for lv, ch in (pcc.get("choices") or {}).items():

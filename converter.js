@@ -185,21 +185,24 @@ async function convert(pc, vault, opts = {}) {
   // skills and saves
   const prof = new Set(), expert = new Set();
   const norm = (s) => String(s).replace(/[- ]/g, "_").toLowerCase();
+  const profSrc = {}; const src = (skills, where) => { for (const x of skills) (profSrc[x] = profSrc[x] || []).push(where); }; // to warn when two sources grant the same skill (one pick is then wasted)
   const sk = pc.skills || {};
   arr(sk.proficient).forEach((s) => prof.add(norm(s))); arr(sk.expertise).forEach((s) => expert.add(norm(s)));
-  arr(bg.skill_proficiencies).forEach((s) => prof.add(norm(s)));
+  arr(bg.skill_proficiencies).forEach((s) => { prof.add(norm(s)); src([norm(s)], "your background"); });
   for (const [, p] of classes) for (const [lv, ch] of Object.entries(p.choices || {})) {
     if (Number(lv) > p.level || !ch || typeof ch !== "object") continue;
     for (const [key, v] of Object.entries(ch)) {
       if (/expertise/i.test(key) && (typeof v === "string" || Array.isArray(v))) arr(v).forEach((x) => { if (typeof x === "string" && !x.startsWith("[[")) expert.add(norm(x)); }); // Rogue/Bard/Ranger expertise picks
-      if (key === "skills" && Array.isArray(v)) v.forEach((s) => prof.add(norm(s)));
-      else if (key.endsWith("skill") && (typeof v === "string" || Array.isArray(v))) arr(v).forEach((s) => prof.add(norm(s)));
+      if (key === "skills" && Array.isArray(v)) v.forEach((s) => { prof.add(norm(s)); src([norm(s)], "your class skill picks"); });
+      else if (key.endsWith("skill") && (typeof v === "string" || Array.isArray(v))) arr(v).forEach((s) => { prof.add(norm(s)); src([norm(s)], `a pick (${key})`); });
     }
   }
   for (const [k, v] of Object.entries(oc)) if (/expertise/i.test(k) && (typeof v === "string" || Array.isArray(v))) arr(v).forEach((x) => { if (typeof x === "string") expert.add(norm(x)); });
-  for (const [k, v] of Object.entries(oc)) if (/^(race|background):/.test(k) && k.endsWith("skill") && (typeof v === "string" || Array.isArray(v))) arr(v).forEach((x) => prof.add(norm(x)));
+  for (const [k, v] of Object.entries(oc)) if (/^(race|background):/.test(k) && k.endsWith("skill") && (typeof v === "string" || Array.isArray(v))) arr(v).forEach((x) => { prof.add(norm(x)); src([norm(x)], `a pick (${k})`); });
+  for (const [k, v] of Object.entries(oc)) if (/^(race|background):replace-skill/.test(k) && (typeof v === "string" || Array.isArray(v))) arr(v).forEach((x) => prof.add(norm(x))); // a skill picked instead of one you already had (Sage's Arcana when you already have it)
   for (const e of effects) if (e.kind === "proficiency" && e.proficiency_type === "skill") { prof.add(norm(e.value)); if (e.expertise) expert.add(norm(e.value)); }
   expert.forEach((x) => prof.add(x)); // expertise implies proficiency
+  for (const [sk2, wh] of Object.entries(profSrc)) if (wh.length > 1 && !expert.has(sk2)) warn.push(`${titleCase(sk2.replace(/_/g, " "))} is granted twice (${wh.join(" and ")}): Archivist does not stop you picking it twice, so one pick is wasted`);
   let half = effects.some((e) => e.kind === "half-proficiency");
   for (const k of SKILLS) {
     const lvl = expert.has(k) ? "2" : prof.has(k) ? "1" : (half && pips ? "half" : null);
@@ -273,7 +276,7 @@ async function convert(pc, vault, opts = {}) {
   for (const [t, r] of Object.entries(sensesU)) sens.push(`${titleCase(t)} ${r} ft`);
   if (sens.length) out.senses = sens.join(", ");
   let langs = arr((race.languages || {}).fixed).map(titleCase);
-  for (const [k, v] of Object.entries(oc)) if (k.startsWith("background:languages") || (k.startsWith("race:") && k.includes("language"))) langs.push(...arr(v).map(titleCase));
+  for (const [k, v] of Object.entries(oc)) if (k.startsWith("background:languages") || /^(race|background):replace-language/.test(k) || (k.startsWith("race:") && k.includes("language"))) langs.push(...arr(v).map(titleCase));
   for (const [, p] of classes) for (const [lv, ch] of Object.entries(p.choices || {})) if (ch && typeof ch === "object" && Number(lv) <= p.level) // a language a feat lets you pick (Prodigy)
     for (const [k, v] of Object.entries(ch)) if (k.startsWith("feat:") && /language/.test(k) && (typeof v === "string" || Array.isArray(v))) langs.push(...arr(v).map((x) => titleCase(String(x).replace(/-/g, " "))));
   langs.push(...arr((((pc.overrides || {}).languages) || {}).add).map((x) => titleCase(String(x).replace(/-/g, " "))));
@@ -298,7 +301,7 @@ async function convert(pc, vault, opts = {}) {
   if (wp.length || wfixed.length) out.weapon_proficiencies = [...wp.map(titleCase), ...wfixed].join(", ");
   const tools = []; for (const t of arr(bg.tool_proficiencies)) if (t && typeof t === "object") tools.push(...arr(t.items).map(String));
   const toolName = (x) => String(x).replace(/-/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase()).replace(/'S\b/g, "'s");
-  for (const [k, v] of Object.entries(oc)) if (/^background:tool/.test(k) || (k.startsWith("race:") && k.includes("tool"))) for (const x of arr(v)) tools.push(String(x).includes("_") ? nameFromSlug(slugOf(String(x))) : toolName(x));
+  for (const [k, v] of Object.entries(oc)) if (/^background:tool/.test(k) || /^(race|background):replace-tool/.test(k) || (k.startsWith("race:") && k.includes("tool"))) for (const x of arr(v)) tools.push(String(x).includes("_") ? nameFromSlug(slugOf(String(x))) : toolName(x));
   for (const [c, p] of classes) for (const [lv, ch] of Object.entries(p.choices || {})) if (Number(lv) <= p.level && ch && typeof ch === "object")
     for (const [key, v] of Object.entries(ch)) if (/(^|-)tools?($|-)/.test(key) && (typeof v === "string" || Array.isArray(v))) tools.push(...arr(v).map(toolName));
   const toolsU = [...new Set(tools.map((t) => /^[a-z' -]+$/.test(t) ? t.replace(/-/g, " ").replace(/\b([a-z])/g, (x) => x.toUpperCase()).replace(/'S/g, "'s") : t))];
