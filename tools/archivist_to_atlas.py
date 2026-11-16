@@ -57,8 +57,28 @@ def parse_note(path):
     blocks = {}
     for b in BLOCK.finditer(text):
         try: blocks[b.group(1)] = yaml.safe_load(b.group(2)) or {}
-        except Exception: pass
+        except Exception:
+            if b.group(1) in ("atlas", "atlas-bio"): blocks[b.group(1)] = lenient_bio(b.group(2))
     return fm, blocks, text
+
+LENIENT_KEYS = ("height", "weight", "eyes", "hair", "skin", "appearance", "personality", "ideals", "bonds", "flaws", "allies", "notes", "notes_2", "backstory", "description", "alignment", "age")
+def lenient_bio(raw):
+    """An ```atlas block that is not valid YAML (an unindented quoted line under `notes_2: |`...): take each known key and
+    everything up to the next known key as its text, rather than losing the whole block."""
+    out, key, buf = {}, None, []
+    def flush():
+        if key is None: return
+        t = "\n".join(buf).strip("\n")
+        t = re.sub(r"^[|>][+-]?\s*\n?", "", t).strip()
+        if len(t) > 1 and t[0] == t[-1] and t[0] in "\"'": t = t[1:-1]
+        t = "\n".join(l.strip() if i else l for i, l in enumerate(t.split("\n"))).strip()
+        if t: out[key] = t
+    for line in raw.split("\n"):
+        m = re.match(r"^(%s):[ \t]*(.*)$" % "|".join(LENIENT_KEYS), line)
+        if m: flush(); key, buf = m.group(1), [m.group(2)]
+        elif key is not None: buf.append(line)
+    flush()
+    return out
 
 class Vault:
     def __init__(self, root):
