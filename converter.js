@@ -401,12 +401,14 @@ async function convert(pc, vault, opts = {}) {
   for (const e of initEffs) if (e && e.kind === "initiative-bonus" && String(e.subject || "self") === "self") { try { initBonus += amt(e); } catch (x) {} }
   out.initiative = m.dex + initBonus;
   // senses from feats (Skulker: Blindsight), invocations (Devil's Sight), class features and worn items
-  for (const e of [...initEffs, ...poolDocs.flatMap((d) => arr(d.effects))]) if (e && e.kind === "sense" && String(e.subject || "self") === "self") { const t = String(e.type || e.sense || "").toLowerCase(), r = Number(e.range || 0); if (t && r > (sensesU[t] || 0)) sensesU[t] = r; }
+  const namedS = {}; // a sense an invocation/option grants keeps its own name: Devil's Sight is not plain Darkvision (it also sees through magical darkness)
+  for (const d of poolDocs) for (const e of arr(d.effects)) if (e && e.kind === "sense" && String(e.subject || "self") === "self" && d.name) namedS[d.name] = Math.max(namedS[d.name] || 0, Number(e.range || 0));
+  for (const e of initEffs) if (e && e.kind === "sense" && String(e.subject || "self") === "self") { const t = String(e.type || e.sense || "").toLowerCase(), r = Number(e.range || 0); if (t && r > (sensesU[t] || 0)) sensesU[t] = r; }
   for (const d of [...featDocs, ...poolDocs]) { // a feat that only states its sense in text ("You have Blindsight with a range of 10 feet")
     if (arr(d.effects).some((e) => e && e.kind === "sense")) continue;
     for (const mm of featText(d).matchAll(/\b(blindsight|darkvision|tremorsense|truesight)\b[^.]{0,40}?\brange of (\d+) feet/gi)) { const t = mm[1].toLowerCase(), r = Number(mm[2]); if (r > (sensesU[t] || 0)) sensesU[t] = r; }
   }
-  const allS = [...sensPre, ...Object.entries(sensesU).map(([t, r]) => `${titleCase(t)} ${r} ft`)]; if (allS.length) out.senses = allS.join(", ");
+  const allS = [...sensPre, ...Object.entries(sensesU).map(([t, r]) => `${titleCase(t)} ${r} ft`), ...Object.entries(namedS).filter(([, r]) => r).map(([n, r]) => `${n} ${r} ft`)]; if (allS.length) out.senses = allS.join(", ");
 
   // spells
   const spells = new Map();

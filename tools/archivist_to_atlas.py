@@ -574,7 +574,12 @@ def convert(pc, vault, short, classic=False, template=None):
             except Exception: pass
     out["initiative"] = m["dex"] + init_bonus
     # senses from feats (Skulker: Blindsight), invocations (Devil's Sight), class features and worn items
-    for e in init_effs + [e_ for d_ in pool_docs for e_ in (d_.get("effects") or []) if isinstance(e_, dict)]:
+    named_s = {}   # a sense an invocation/option grants keeps its own name: Devil's Sight is not plain Darkvision (it also sees through magical darkness)
+    for d_ in pool_docs:
+        for e_ in (d_.get("effects") or []):
+            if isinstance(e_, dict) and e_.get("kind") == "sense" and str(e_.get("subject") or "self") == "self" and d_.get("name"):
+                named_s[d_["name"]] = max(named_s.get(d_["name"], 0), int(e_.get("range") or 0))
+    for e in init_effs:
         if isinstance(e, dict) and e.get("kind") == "sense" and str(e.get("subject") or "self") == "self":
             t_ = str(e.get("type") or e.get("sense") or "").lower(); r_ = int(e.get("range") or 0)
             if t_ and r_ > senses_.get(t_, 0): senses_[t_] = r_
@@ -583,7 +588,7 @@ def convert(pc, vault, short, classic=False, template=None):
         for mm_ in re.finditer(r"(?i)\b(blindsight|darkvision|tremorsense|truesight)\b[^.]{0,40}?\brange of (\d+) feet", feat_text(d_) if "benefits" in d_ else first_text(d_)):
             t_, r_ = mm_.group(1).lower(), int(mm_.group(2))
             if r_ > senses_.get(t_, 0): senses_[t_] = r_
-    _all_s = sens_pre + [f"{t_.title()} {r_} ft" for t_, r_ in senses_.items()]
+    _all_s = sens_pre + [f"{t_.title()} {r_} ft" for t_, r_ in senses_.items()] + [f"{n_} {r_} ft" for n_, r_ in named_s.items() if r_]
     if _all_s: out["senses"] = ", ".join(_all_s)
 
     # ---- spells
