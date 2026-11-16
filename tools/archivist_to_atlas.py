@@ -798,6 +798,23 @@ def convert(pc, vault, short, classic=False, template=None):
                     if isinstance(r_, dict) and r_.get("id") and r_.get("name"):
                         resmap[r_["id"]] = r_["name"]
                         for eq_ in r_.get("equivalent_ids") or []: resmap.setdefault(eq_, r_["name"])
+    # drop leftovers of things the character no longer has (a Dragonborn's Breath Weapon after switching species)
+    _sl = lambda x: re.sub(r"[^a-z0-9]+", "-", str(x or "").lower()).strip("-")
+    _refs = [pc.get("race"), pc.get("subrace"), pc.get("background")] + [c_.get("name") for c_ in pc["class"]] + [c_.get("subclass") for c_ in pc["class"]]
+    for c_ in pc["class"]:
+        for ch_ in (c_.get("choices") or {}).values():
+            if isinstance(ch_, dict): _refs += [v_ for v_ in ch_.values() if isinstance(v_, str) and "_" in v_]
+    _refs += [v_ for v_ in oc.values() if isinstance(v_, str) and "_" in v_]
+    _live_p = set()
+    for r_ in _refs:
+        sl_ = slug_of(r_) if r_ else ""
+        if sl_: _live_p |= {sl_, sl_.split("_")[-1]}
+    _live_n = {_sl(e_.get("name")) for sec_ in ("species_traits", "class_features", "feats", "bonus_actions", "reactions") for e_ in (out.get(sec_) or []) if isinstance(e_, dict)}
+    def _live(k_):
+        if k_ in resmap or ":" not in k_: return True
+        pref_, _, fid_ = k_.rpartition(":")
+        return pref_ in _live_p or any(pref_.endswith(x_) or x_.endswith(pref_) for x_ in _live_p if len(x_) > 2) or fid_ in _live_n
+    fu = {k_: v_ for k_, v_ in fu.items() if _live(k_)}
     res_c = []
     for k, v in fu.items():
         if not isinstance(v, dict) or not v.get("max"): continue

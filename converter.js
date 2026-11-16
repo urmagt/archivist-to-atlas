@@ -548,7 +548,16 @@ async function convert(pc, vault, opts = {}) {
   const resmap = {}; // resource id -> display name (Lay On Hands, Paladin's Smite, Channel Divinity...)
   for (const src of [...classes.map(([c]) => c), ...(await Promise.all(classes.filter(([, p]) => p.subclass).map(([, p]) => vault.get(p.subclass)))), race])
     for (const fl of Object.values((src && src.features_by_level) || {})) for (const ft of arr(fl)) for (const r of arr(ft && ft.resources)) if (r && r.id && r.name) { resmap[r.id] = r.name; for (const q of arr(r.equivalent_ids)) if (!(q in resmap)) resmap[q] = r.name; }
-  const fu = (pc.state || {}).feature_uses || {}, cfn = {};
+  const fuRaw = (pc.state || {}).feature_uses || {}, cfn = {};
+  // drop leftovers of things the character no longer has (a Dragonborn's Breath Weapon after switching species)
+  const slg = (x) => String(x || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const refs = [pc.race, pc.subrace, pc.background, ...classesPc.map((c) => c.name), ...classesPc.map((c) => c.subclass)];
+  for (const c of classesPc) for (const ch of Object.values(c.choices || {})) if (ch && typeof ch === "object") refs.push(...Object.values(ch).filter((v) => typeof v === "string" && v.includes("_")));
+  refs.push(...Object.values(oc).filter((v) => typeof v === "string" && v.includes("_")));
+  const liveP = new Set(); for (const r of refs) { const sl = r ? slugOf(r) : ""; if (sl) { liveP.add(sl); liveP.add(sl.split("_").pop()); } }
+  const liveN = new Set(["species_traits", "class_features", "feats", "bonus_actions", "reactions"].flatMap((sec) => arr(out[sec]).map((e) => slg(e && e.name))));
+  const live = (k) => { if (k in resmap || !k.includes(":")) return true; const i = k.lastIndexOf(":"), pref = k.slice(0, i), fid = k.slice(i + 1); return liveP.has(pref) || [...liveP].some((x) => x.length > 2 && (pref.endsWith(x) || x.endsWith(pref))) || liveN.has(fid); };
+  const fu = Object.fromEntries(Object.entries(fuRaw).filter(([k]) => live(k)));
   for (const f of cf) cfn[f.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")] = f.name;
   const resC = [];
   for (const [k, v] of Object.entries(fu)) { if (!v || typeof v !== "object" || !v.max) continue; const fid = k.split(":").pop(); resC.push({ name: resmap[k] || cfn[fid] || titleCase(fid.replace(/-/g, " ")), max: Number(v.max), used: Number(v.used || 0) }); }
