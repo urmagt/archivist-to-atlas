@@ -190,7 +190,9 @@ def convert(pc, vault, short, classic=False, template=None):
             if int(lv) <= c["level"] and isinstance(ch, dict):
                 for k_, v_ in ch.items():   # ability-points picks of the ASI feat or any feat taken in a class slot
                     if str(k_).startswith("feat:") and _ab_points(v_):
-                        for a, n in v_.items(): sc[a] = min(20, sc[a] + n)
+                        fd_ = vault.get(ch.get("feat")) if isinstance(ch.get("feat"), str) else None
+                        cap_ = 30 if isinstance(fd_, dict) and "maximum of 30" in str(fd_.get("description") or "") else 20   # Epic Boons
+                        for a, n in v_.items(): sc[a] = min(cap_, sc[a] + n)
                 fref = ch.get("feat")       # a feat with one fixed ability (grants_asi) and no ability-points choice
                 if isinstance(fref, str) and fref:
                     fd = vault.get(fref); ga = fd.get("grants_asi") if isinstance(fd, dict) else None
@@ -327,6 +329,13 @@ def convert(pc, vault, short, classic=False, template=None):
     saves = []
     for a in (first_cls.get("saving_throws") or []):
         saves.append({ABIL_FULL[a]: m[a] + pb})
+    for cdat, pcc in classes:   # a saving throw proficiency a feat lets you pick (Resilient)
+        for lv_, ch_ in (pcc.get("choices") or {}).items():
+            if isinstance(ch_, dict) and int(lv_) <= pcc["level"]:
+                for k_, v_ in ch_.items():
+                    if str(k_).startswith("feat:") and re.search(r"save", k_):
+                        for a_ in ([v_] if isinstance(v_, str) else v_ if isinstance(v_, list) else []):
+                            if a_ in ABILS and not any(ABIL_FULL[a_] in d_ for d_ in saves): saves.append({ABIL_FULL[a_]: m[a_] + pb})
     if saves: out["saves"] = saves
     pp = 10 + m["wis"] + (pb * (2 if "perception" in expert else 1) if ("perception" in prof or "perception" in expert) else 0)
 

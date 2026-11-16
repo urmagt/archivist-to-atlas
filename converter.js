@@ -101,7 +101,8 @@ async function convert(pc, vault, opts = {}) {
   for (const [k, v] of Object.entries(oc)) if (bgGives && k.startsWith("background:") && abPoints(v)) for (const [a, n] of Object.entries(v)) sc[a] += n;
   for (const c of classesPc) for (const [lv, ch] of Object.entries(c.choices || {})) {
     if (Number(lv) > c.level || !ch || typeof ch !== "object") continue;
-    for (const [k, v] of Object.entries(ch)) if (k.startsWith("feat:") && abPoints(v)) for (const [a, n] of Object.entries(v)) sc[a] = Math.min(20, sc[a] + n);
+    { const fd0 = typeof ch.feat === "string" && ch.feat ? await vault.get(ch.feat) : null, cap = fd0 && String(fd0.description || "").includes("maximum of 30") ? 30 : 20; // Epic Boons
+      for (const [k, v] of Object.entries(ch)) if (k.startsWith("feat:") && abPoints(v)) for (const [a, n] of Object.entries(v)) sc[a] = Math.min(cap, sc[a] + n); }
     if (typeof ch.feat === "string" && ch.feat) { // a feat with one fixed ability (grants_asi) and no ability-points choice
       const fd = await vault.get(ch.feat), ga = fd && fd.grants_asi;
       if (ga && Array.isArray(ga.pool) && ga.pool.length === 1 && ga.pool[0] in sc && !arr(fd.choices).some((x) => x && x.kind === "ability-points")) sc[ga.pool[0]] = Math.min(20, sc[ga.pool[0]] + Number(ga.amount || 1));
@@ -205,6 +206,8 @@ async function convert(pc, vault, opts = {}) {
     if (lvl) out[`${k}_prof`] = pips ? PROF_SYMBOL[lvl] : lvl;
   }
   const saves = arr(firstCls.saving_throws).map((a) => ({ [ABIL_FULL[a]]: m[a] + pb }));
+  for (const c of classesPc) for (const [lv, ch] of Object.entries(c.choices || {})) if (ch && typeof ch === "object" && Number(lv) <= c.level) // a saving throw proficiency a feat lets you pick (Resilient)
+    for (const [k, v] of Object.entries(ch)) if (k.startsWith("feat:") && /save/.test(k)) for (const a of arr(v)) if (ABILS.includes(a) && !saves.some((o) => ABIL_FULL[a] in o)) saves.push({ [ABIL_FULL[a]]: m[a] + pb });
   if (saves.length) out.saves = saves;
   const pp = 10 + m.wis + (prof.has("perception") || expert.has("perception") ? pb * (expert.has("perception") ? 2 : 1) : 0);
 
