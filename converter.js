@@ -500,6 +500,23 @@ async function convert(pc, vault, opts = {}) {
     const cands = [...Object.entries(oc), ...classes.flatMap(([, p]) => Object.values(p.choices || {}).filter((ch) => ch && typeof ch === "object").flatMap((ch) => Object.entries(ch)))];
     for (const [k, v] of cands) if (String(k).endsWith("spellcasting-ability") && ABILS.includes(v)) { scAb = v; break; }
   }
+  // spells a feat grants cast with the ability that feat raised (Fey-Touched, Shadow-Touched...), which can differ from the class's
+  const featAb = new Map();
+  for (const [c, p] of classes) for (const [lv, ch] of Object.entries(p.choices || {})) {
+    if (!(ch && typeof ch === "object" && Number(lv) <= p.level && typeof ch.feat === "string")) continue;
+    const fd = await vault.get(ch.feat), ents = fd && fd.additional_spells; if (!Array.isArray(ents) || !ents.length) continue;
+    let ab = null; for (const [k, v] of Object.entries(ch)) if (String(k).endsWith("spellcasting-ability") && ABILS.includes(v)) { ab = v; break; }
+    if (!ab) { const pts = ch["feat:asi"]; if (abPoints(pts)) ab = Object.keys(pts).reduce((a, b) => (pts[b] > pts[a] ? b : a)); else if (ents[0] && ABILS.includes(ents[0].ability)) ab = ents[0].ability; }
+    if (!ab) continue;
+    for (const [k, v] of Object.entries(ch)) if (k.startsWith("feat:") && /cantrip|spell|level\d/.test(k) && !k.includes("list") && !k.includes("ability")) for (const x of arr(v)) if (typeof x === "string") featAb.set(slugOf(x), ab);
+    for (const e of ents) for (const key of ["known", "prepared", "innate"]) for (const nm of fixedNames((e && e[key]) || {})) { const s2 = nm.toLowerCase().replace(/['’]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""); for (const sk of spells.keys()) if (sk === s2 || sk.endsWith("_spell_" + s2)) featAb.set(sk, ab); }
+  }
+  if (!scAb && featAb.size) scAb = [...featAb.values()][0];
+  if (featAb.size) {
+    const lab = new Map(); for (const [sl, a] of featAb) if (info.has(sl)) { const d = info.get(sl) || {}; lab.set(spellLabel(d, d.name || nameFromSlug(sl), opts), a); }
+    const tag = (e) => { const a = lab.get(e.name); if (a && a !== scAb) e.desc = `${e.desc || ""}\n\nCast with ${titleCase(ABIL_FULL[a])}: save DC ${8 + pb + m[a]}, spell attack ${signed(pb + m[a])}`.trim(); };
+    for (const e of cant) tag(e); for (const l of [...Object.values(tabs), ...Object.values(book)]) for (const e of l) tag(e);
+  }
   if (scAb && (cant.length || Object.keys(tabs).length || prepCounters.length)) {
     out.spellcasting_ability = pips ? titleCase(ABIL_FULL[scAb]).slice(0, 3) : titleCase(ABIL_FULL[scAb]); out.spell_save_dc = `8+@${scAb}.mod+@pb`; out.spell_attack_bonus = `@${scAb}.mod+@pb`;
   }

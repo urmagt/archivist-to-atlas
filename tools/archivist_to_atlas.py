@@ -709,6 +709,39 @@ def convert(pc, vault, short, classic=False, template=None):
     if not sc_ab:   # a non-caster with species/feat spells (Wood Elf Rogue): use the ability picked for them
         for k_, v_ in list(oc.items()) + [(k2, v2) for _c, pc_ in classes for ch_ in (pc_.get("choices") or {}).values() if isinstance(ch_, dict) for k2, v2 in ch_.items()]:
             if str(k_).endswith("spellcasting-ability") and v_ in ABILS: sc_ab = v_; break
+    # spells a feat grants cast with the ability that feat raised (Fey-Touched, Shadow-Touched...), which can differ from the class's
+    feat_ab = {}   # spell slug -> ability
+    for cdat, pcc in classes:
+        for lv_, ch_ in (pcc.get("choices") or {}).items():
+            if not (isinstance(ch_, dict) and int(lv_) <= pcc["level"] and isinstance(ch_.get("feat"), str)): continue
+            fd_ = vault.get(ch_["feat"]); ents_ = fd_.get("additional_spells") if isinstance(fd_, dict) else None
+            if not isinstance(ents_, list) or not ents_: continue
+            ab_ = next((v for k, v in ch_.items() if str(k).endswith("spellcasting-ability") and v in ABILS), None)
+            if not ab_:
+                pts_ = ch_.get("feat:asi")
+                if _ab_points(pts_): ab_ = max(pts_, key=lambda a: pts_[a])
+                elif isinstance(ents_[0], dict) and ents_[0].get("ability") in ABILS: ab_ = ents_[0]["ability"]
+            if not ab_: continue
+            for k, v in ch_.items():
+                if str(k).startswith("feat:") and re.search(r"cantrip|spell|level\d", k) and "list" not in k and "ability" not in k:
+                    for x in (v if isinstance(v, list) else [v]):
+                        if isinstance(x, str): feat_ab[slug_of(x)] = ab_
+            for e_ in ents_:
+                for key_ in ("known", "prepared", "innate"):
+                    for nm_ in _fixed_names(e_.get(key_) or {}) if isinstance(e_, dict) else []:
+                        sl2 = re.sub(r"[^a-z0-9]+", "-", re.sub(r"['’]", "", nm_.lower())).strip("-")
+                        for sk in spells:
+                            if sk == sl2 or sk.endswith("_spell_" + sl2): feat_ab[sk] = ab_
+    if not sc_ab and feat_ab: sc_ab = next(iter(feat_ab.values()))
+    if feat_ab:
+        lab_ = {spell_label(info[sl].get("name") and info[sl] or {}, info[sl].get("name") or name_from_slug(sl)): a_ for sl, a_ in feat_ab.items() if sl in info}
+        def _tag(e_):
+            a_ = lab_.get(e_.get("name"))
+            if a_ and a_ != sc_ab:
+                e_["desc"] = ((e_.get("desc") or "") + f"\n\nCast with {ABIL_FULL[a_].title()}: save DC {8 + pb + m[a_]}, spell attack {signed(pb + m[a_])}").strip()
+        for e_ in cant: _tag(e_)
+        for lst_ in list(tabs.values()) + list(book.values()):
+            for e_ in lst_: _tag(e_)
     if sc_ab and (cant or tabs or prepared_counters):
         out["spellcasting_ability"] = ABIL_FULL[sc_ab].title()[:3] if pips else ABIL_FULL[sc_ab].title()
         out["spell_save_dc"] = f"8+@{sc_ab}.mod+@pb"
